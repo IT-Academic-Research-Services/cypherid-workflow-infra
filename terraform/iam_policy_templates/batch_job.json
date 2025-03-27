@@ -1,0 +1,74 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:List*",
+        "s3:GetObject*"
+      ],
+      "Resource": [
+        "arn:aws:s3:::aegea-batch-jobs-${AWS_ACCOUNT_ID}",
+        "arn:aws:s3:::aegea-batch-jobs-${AWS_ACCOUNT_ID}/*",
+        "arn:aws:s3:::idseq-workflows",
+        "arn:aws:s3:::idseq-workflows/*",
+        "arn:aws:s3:::idseq-public-references",
+        "arn:aws:s3:::idseq-public-references/*",
+        "arn:aws:s3:::czid-public-references",
+        "arn:aws:s3:::czid-public-references/*",
+        "arn:aws:s3:::idseq-database",
+        "arn:aws:s3:::idseq-database/*",
+        "arn:aws:s3:::idseq-bench",
+        "arn:aws:s3:::idseq-bench/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:List*",
+        "s3:GetObject*",
+        "s3:PutObject*"
+      ],
+      "Resource": [
+        "arn:aws:s3:::idseq-${DEPLOYMENT_ENVIRONMENT}-*",
+        "arn:aws:s3:::idseq-${DEPLOYMENT_ENVIRONMENT}-*/*",
+        "arn:aws:s3:::idseq-samples-test",
+        "arn:aws:s3:::idseq-samples-test/*",
+        "arn:aws:s3:::idseq-samples-development",
+        "arn:aws:s3:::idseq-samples-development/*",
+        "arn:aws:s3:::idseq-samples-sandbox",
+        "arn:aws:s3:::idseq-samples-sandbox/*",
+        "arn:aws:s3:::idseq-samples-staging",
+        "arn:aws:s3:::idseq-samples-staging/*",
+        "arn:aws:s3:::idseq-samples-${DEPLOYMENT_ENVIRONMENT}",
+        "arn:aws:s3:::idseq-samples-${DEPLOYMENT_ENVIRONMENT}/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "batch:DescribeJobs",
+        "batch:SubmitJob",
+        "cloudwatch:PutMetricData"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetParameter"
+      ],
+      "Resource": [
+        "arn:aws:ssm:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:parameter/idseq-${DEPLOYMENT_ENVIRONMENT == "dev" ? "sandbox" : DEPLOYMENT_ENVIRONMENT}-web/DB_PORT",
+        "arn:aws:ssm:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:parameter/idseq-${DEPLOYMENT_ENVIRONMENT == "dev" ? "sandbox" : DEPLOYMENT_ENVIRONMENT}-web/DB_USERNAME",
+        "arn:aws:ssm:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:parameter/idseq-${DEPLOYMENT_ENVIRONMENT == "dev" ? "sandbox" : DEPLOYMENT_ENVIRONMENT}-web/db_password",
+        "arn:aws:ssm:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:parameter/idseq-${DEPLOYMENT_ENVIRONMENT == "dev" ? "sandbox" : DEPLOYMENT_ENVIRONMENT}-web/RDS_ADDRESS"
+      ]
+    }%{ if PARAMETER_KMS_KEY_ARN != "" },
+    {
+      "Effect": "Allow",
+      "Action": "kms:Decrypt",
+      "Resource": "${PARAMETER_KMS_KEY_ARN}"
+    }%{ endif }
+  ]
+}

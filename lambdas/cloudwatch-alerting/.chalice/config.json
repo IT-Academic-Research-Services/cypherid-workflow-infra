@@ -1,0 +1,16 @@
+{
+  "version": "2.0",
+  "app_name": "cloudwatch-alerting",
+  "autogen_policy": false,
+  "lambda_memory_size": 256,
+  "lambda_timeout": 600,
+  "tags": {
+    "managedBy": "chalice",
+    "project": "idseq"
+  },
+  "environment_variables": {
+    "SLACK_CHANNEL": "${var.alerts_slack_channel}",
+    "SLACK_CHANNEL_ID": "${var.alerts_slack_channel_id}",
+    "SLACK_OAUTH_TOKEN_SECRET_NAME": "${var.slack_oauth_token_secret_name}"
+  }
+}

@@ -1,0 +1,10 @@
+FROM public.ecr.aws/lambda/nodejs:18
+
+# Copy and unzip pre-packaged code/dependencies into the working directory
+RUN yum install unzip -y
+COPY deployment.zip ${LAMBDA_TASK_ROOT}
+RUN unzip ${LAMBDA_TASK_ROOT}/deployment.zip -d ${LAMBDA_TASK_ROOT}
+
+ENV DEPLOYMENT_ENVIRONMENT=dev
+
+CMD [ "app.handler" ]

@@ -1,0 +1,35 @@
+{
+  "version": "2.0",
+  "app_name": "taxon-indexing-lambda",
+  "autogen_policy": false,
+  "automatic_layer": false,
+  "lambda_memory_size": 512,
+  "lambda_timeout": 900,
+  "stages": {
+    "sandbox": {
+      "subnet_ids": [
+        "subnet-088e0dc3fd1668e7b"
+      ],
+      "security_group_ids": [
+        "sg-02ebc39973ba8bda6"
+      ]
+    },
+    "staging": {
+      "subnet_ids": [
+        "subnet-e82dbb91"
+      ],
+      "security_group_ids": [
+        "sg-0fa8c7f0e1c370c62"
+      ]
+    },
+    "prod": {
+      "subnet_ids": [
+        "subnet-0853ed37d5fe42d04"
+      ],
+      "security_group_ids": [
+        "sg-0f59b0a921c15211b"
+      ]
+    }
+  },
+  "environment_variables": {}
+}

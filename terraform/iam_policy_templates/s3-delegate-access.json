@@ -1,0 +1,38 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DelegateS3Access",
+      "Effect": "Allow",
+      "Principal": {"AWS": ${jsonencode(delegated_arns)}},
+      "Action": [
+        "s3:ListBucket*",
+        "s3:GetObject*",
+        "s3:PutObject*"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${bucket_name}/*",
+        "arn:aws:s3:::${bucket_name}"
+      ]
+    },
+    {
+      "Sid": "PublicRead",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": [
+        "s3:GetObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${bucket_name}/alignment_data/*",
+        "arn:aws:s3:::${bucket_name}/amr/argannot*",
+        "arn:aws:s3:::${bucket_name}/amr/ARGannot*",
+        "arn:aws:s3:::${bucket_name}/consensus-genome/*",
+        "arn:aws:s3:::${bucket_name}/host_filter/*",
+        "arn:aws:s3:::${bucket_name}/mini-database/*",
+        "arn:aws:s3:::${bucket_name}/ncbi-sources/*",
+        "arn:aws:s3:::${bucket_name}/taxonomy/*",
+        "arn:aws:s3:::${bucket_name}/test/*"
+      ]
+    }
+  ]
+}

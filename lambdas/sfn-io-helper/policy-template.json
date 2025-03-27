@@ -1,0 +1,79 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:List*",
+        "s3:GetObject*",
+        "s3:PutObject*"
+      ],
+      "Resource": [
+        "arn:aws:s3:::idseq-${DEPLOYMENT_ENVIRONMENT}-*",
+        "arn:aws:s3:::idseq-${DEPLOYMENT_ENVIRONMENT}-*/*",
+        "arn:aws:s3:::idseq-samples-development",
+        "arn:aws:s3:::idseq-samples-development/*",
+        "arn:aws:s3:::idseq-samples-sandbox",
+        "arn:aws:s3:::idseq-samples-sandbox/*",
+        "arn:aws:s3:::idseq-samples-staging",
+        "arn:aws:s3:::idseq-samples-staging/*",
+        "arn:aws:s3:::idseq-samples-${DEPLOYMENT_ENVIRONMENT}",
+        "arn:aws:s3:::idseq-samples-${DEPLOYMENT_ENVIRONMENT}/*",
+        "arn:aws:s3:::idseq-public-references",
+        "arn:aws:s3:::idseq-public-references/*",
+        "arn:aws:s3:::czid-public-references",
+        "arn:aws:s3:::czid-public-references/*",
+        "arn:aws:s3:::idseq-database",
+        "arn:aws:s3:::idseq-database/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "batch:DescribeComputeEnvironments",
+        "batch:DescribeJobDefinitions",
+        "batch:DescribeJobQueues",
+        "batch:DescribeJobs",
+        "batch:ListJobs",
+        "batch:TerminateJob",
+        "batch:UpdateComputeEnvironment"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "states:ListStateMachines",
+      "Resource": "arn:aws:states:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "states:DescribeStateMachine",
+        "states:ListExecutions",
+        "states:DescribeExecution",
+        "states:DescribeStateMachineForExecution",
+        "states:GetExecutionHistory"
+      ],
+      "Resource": [
+        "arn:aws:states:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:stateMachine:idseq-${DEPLOYMENT_ENVIRONMENT}-*",
+        "arn:aws:states:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:execution:idseq-${DEPLOYMENT_ENVIRONMENT}-*",
+        "arn:aws:states:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:stateMachine:idseq-swipe-${DEPLOYMENT_ENVIRONMENT}-*",
+        "arn:aws:states:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:execution:idseq-swipe-${DEPLOYMENT_ENVIRONMENT}-*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": "cloudwatch:PutMetricData",
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:*:*:*"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "version": "2.0",
+  "app_name": "idseq",
+  "autogen_policy": false,
+  "lambda_memory_size": 256,
+  "lambda_timeout": 600,
+  "tags": {
+    "managedBy": "chalice",
+    "project": "idseq"
+  },
+  "stages": {
+    "test": {
+      "environment_variables": {}
+    },
+    "dev": {
+      "environment_variables": {}
+    },
+    "integration": {
+      "environment_variables": {}
+    },
+    "staging": {
+      "environment_variables": {}
+    },
+    "prod": {
+      "environment_variables": {}
+    }
+  },
+  "environment_variables": {
+    "RunSPOTMemoryDefault": "128000",
+    "RunEC2MemoryDefault": "128000",
+    "HostFilterSPOTMemoryDefault": "128000",
+    "HostFilterEC2MemoryDefault": "256000",
+    "NonHostAlignmentSPOTMemoryDefault": "128000",
+    "NonHostAlignmentEC2MemoryDefault": "256000",
+    "PostprocessSPOTMemoryDefault": "128000",
+    "PostprocessEC2MemoryDefault": "256000",
+    "ExperimentalSPOTMemoryDefault": "128000",
+    "ExperimentalEC2MemoryDefault": "256000"
+  }
+}
