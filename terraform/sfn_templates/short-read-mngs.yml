@@ -1,0 +1,339 @@
+Comment: IDseq pipeline main entry point
+StartAt: PreprocessInput
+TimeoutSeconds: 259200 # 72 hours (total execution run time, including Batch job scheduling delays)
+States:
+  PreprocessInput:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    Parameters:
+      FunctionName: "${preprocess_input_lambda_name}"
+      Payload: &PassthroughStatePayload
+        ExecutionId.$: $$.Execution.Id
+        CurrentState.$: $$.State.Name
+        Input.$: $
+    OutputPath: $.Payload
+    Next: HostFilterSPOT
+  HostFilterSPOT:
+    Type: Task
+    Resource: arn:aws:states:::batch:submitJob.sync
+    Parameters:
+      JobQueue: "${batch_spot_job_queue_arn}"
+      JobName.$: $$.Execution.Name
+      JobDefinition: &JobDefinition "${batch_job_definition_name}"
+      Timeout: &HostFilterBatchTimeout
+        AttemptDurationSeconds: 36000 # 10 hours
+      ContainerOverrides:
+        Memory.$: $.HostFilterSPOTMemory
+        Environment: &HostFilterEnvironment
+          - Name: WDL_INPUT_URI
+            Value.$: $.HOST_FILTER_INPUT_URI
+          - Name: WDL_WORKFLOW_URI
+            Value.$: $.HOST_FILTER_WDL_URI
+          - Name: WDL_OUTPUT_URI
+            Value.$: $.HOST_FILTER_OUTPUT_URI
+          - Name: SFN_EXECUTION_ID
+            Value.$: $$.Execution.Id
+          - Name: SFN_CURRENT_STATE
+            Value.$: $$.State.Name
+    ResultPath: $.BatchJobDetails.HostFilter
+    Next: HostFilterReadOutput
+    Retry: &BatchRetryConfig
+      - ErrorEquals: ["Batch.AWSBatchException"]
+        IntervalSeconds: 15
+        MaxAttempts: 3
+        BackoffRate: 2.0
+    Catch:
+      - ErrorEquals: ["States.ALL"]
+        ResultPath: $.BatchJobError.HostFilterSPOT
+        Next: HostFilterGetCause
+  HostFilterGetCause:
+    Type: Pass
+    Parameters:
+      "Cause.$": "States.StringToJson($.BatchJobError.HostFilterSPOT.Cause)"
+    ResultPath: "$.BatchJobError.HostFilterSPOT"
+    Next: HostFilterDetectError
+  HostFilterDetectError:
+    Type: Choice
+    Choices:
+      - Variable: "$.BatchJobError.HostFilterSPOT.Cause.StatusReason"
+        StringMatches: "Host EC2 (instance i-*) terminated."
+        Next: HostFilterEC2
+    Default: HostFilterReadOutput
+  HostFilterEC2:
+    Type: Task
+    Resource: arn:aws:states:::batch:submitJob.sync
+    Parameters:
+      JobQueue: "${batch_on_demand_job_queue_arn}"
+      JobName.$: $$.Execution.Name
+      JobDefinition: *JobDefinition
+      Timeout: *HostFilterBatchTimeout
+      ContainerOverrides:
+        Memory.$: $.HostFilterEC2Memory
+        Environment: *HostFilterEnvironment
+    ResultPath: $.BatchJobDetails.HostFilter
+    Next: HostFilterReadOutput
+    Retry: *BatchRetryConfig
+    Catch:
+      - ErrorEquals: ["States.ALL"]
+        ResultPath: $.BatchJobError.HostFilterEC2
+        Next: HostFilterReadOutput
+  HostFilterReadOutput:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    Parameters: &ReadOutputParameters
+      FunctionName: "${process_stage_output_lambda_name}"
+      Payload: *PassthroughStatePayload
+    OutputPath: $.Payload
+    Next: HostFilterSucceeded
+    Catch:
+      - ErrorEquals: ["States.ALL"]
+        Next: HostFilterFailed
+  HostFilterFailed:
+    Type: Pass
+    Next: HandleFailure
+  HostFilterSucceeded:
+    Type: Pass
+    Next: NonHostAlignmentSPOT
+  NonHostAlignmentSPOT:
+    Type: Task
+    Resource: arn:aws:states:::batch:submitJob.sync
+    Parameters:
+      JobQueue: "${batch_spot_job_queue_arn}"
+      JobName.$: $$.Execution.Name
+      JobDefinition: *JobDefinition
+      Timeout: &NonHostAlignmentBatchTimeout
+        AttemptDurationSeconds: 72000 # 20 hours
+      ContainerOverrides:
+        Memory.$: $.NonHostAlignmentSPOTMemory
+        Environment: &NonHostAlignmentEnvironment
+          - Name: WDL_INPUT_URI
+            Value.$: $.NON_HOST_ALIGNMENT_INPUT_URI
+          - Name: WDL_WORKFLOW_URI
+            Value.$: $.NON_HOST_ALIGNMENT_WDL_URI
+          - Name: WDL_OUTPUT_URI
+            Value.$: $.NON_HOST_ALIGNMENT_OUTPUT_URI
+          - Name: SFN_EXECUTION_ID
+            Value.$: $$.Execution.Id
+          - Name: SFN_CURRENT_STATE
+            Value.$: $$.State.Name
+    ResultPath: $.BatchJobDetails.NonHostAlignment
+    Next: NonHostAlignmentReadOutput
+    Retry: *BatchRetryConfig
+    Catch:
+      - ErrorEquals: ["States.ALL"]
+        ResultPath: $.BatchJobError.NonHostAlignmentSPOT
+        Next: NonHostAlignmentGetCause
+  NonHostAlignmentGetCause:
+    Type: Pass
+    Parameters:
+      "Cause.$": "States.StringToJson($.BatchJobError.NonHostAlignmentSPOT.Cause)"
+    ResultPath: "$.BatchJobError.NonHostAlignmentSPOT"
+    Next: NonHostAlignmentDetectError
+  NonHostAlignmentDetectError:
+    Type: Choice
+    Choices:
+      - Variable: "$.BatchJobError.NonHostAlignmentSPOT.Cause.StatusReason"
+        StringMatches: "Host EC2 (instance i-*) terminated."
+        Next: NonHostAlignmentEC2
+    Default: NonHostAlignmentReadOutput
+  NonHostAlignmentEC2:
+    Type: Task
+    Resource: arn:aws:states:::batch:submitJob.sync
+    Parameters:
+      JobQueue: "${batch_on_demand_job_queue_arn}"
+      JobName.$: $$.Execution.Name
+      JobDefinition: *JobDefinition
+      Timeout: *NonHostAlignmentBatchTimeout
+      ContainerOverrides:
+        Memory.$: $.NonHostAlignmentEC2Memory
+        Environment: *NonHostAlignmentEnvironment
+    ResultPath: $.BatchJobDetails.NonHostAlignment
+    Next: NonHostAlignmentReadOutput
+    Retry: *BatchRetryConfig
+    Catch:
+      - ErrorEquals: ["States.ALL"]
+        ResultPath: $.BatchJobError.NonHostAlignmentEC2
+        Next: NonHostAlignmentReadOutput
+  NonHostAlignmentReadOutput:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    Parameters: *ReadOutputParameters
+    OutputPath: $.Payload
+    Next: NonHostAlignmentSucceeded
+    Catch:
+      - ErrorEquals: ["States.ALL"]
+        Next: NonHostAlignmentFailed
+  NonHostAlignmentFailed:
+    Type: Pass
+    Next: HandleFailure
+  NonHostAlignmentSucceeded:
+    Type: Pass
+    Next: PostprocessSPOT
+  PostprocessSPOT:
+    Type: Task
+    Resource: arn:aws:states:::batch:submitJob.sync
+    Parameters:
+      JobQueue: "${batch_spot_job_queue_arn}"
+      JobName.$: $$.Execution.Name
+      JobDefinition: *JobDefinition
+      Timeout: &PostprocessBatchTimeout
+        AttemptDurationSeconds: 36000 # 10 hours
+      ContainerOverrides:
+        Memory.$: $.PostprocessSPOTMemory
+        Environment: &PostprocessEnvironment
+          - Name: WDL_INPUT_URI
+            Value.$: $.POSTPROCESS_INPUT_URI
+          - Name: WDL_WORKFLOW_URI
+            Value.$: $.POSTPROCESS_WDL_URI
+          - Name: WDL_OUTPUT_URI
+            Value.$: $.POSTPROCESS_OUTPUT_URI
+          - Name: SFN_EXECUTION_ID
+            Value.$: $$.Execution.Id
+          - Name: SFN_CURRENT_STATE
+            Value.$: $$.State.Name
+    ResultPath: $.BatchJobDetails.Postprocess
+    Next: PostprocessReadOutput
+    Retry: *BatchRetryConfig
+    Catch:
+      - ErrorEquals: ["States.ALL"]
+        ResultPath: $.BatchJobError.PostprocessSPOT
+        Next: PostprocessGetCause
+  PostprocessGetCause:
+    Type: Pass
+    Parameters:
+      "Cause.$": "States.StringToJson($.BatchJobError.PostprocessSPOT.Cause)"
+    ResultPath: "$.BatchJobError.PostprocessSPOT"
+    Next: PostprocessDetectError
+  PostprocessDetectError:
+    Type: Choice
+    Choices:
+      - Variable: "$.BatchJobError.PostprocessSPOT.Cause.StatusReason"
+        StringMatches: "Host EC2 (instance i-*) terminated."
+        Next: PostprocessEC2
+    Default: PostprocessReadOutput
+  PostprocessEC2:
+    Type: Task
+    Resource: arn:aws:states:::batch:submitJob.sync
+    Parameters:
+      JobQueue: "${batch_on_demand_job_queue_arn}"
+      JobName.$: $$.Execution.Name
+      JobDefinition: *JobDefinition
+      Timeout: *PostprocessBatchTimeout
+      ContainerOverrides:
+        Memory.$: $.PostprocessEC2Memory
+        Environment: *PostprocessEnvironment
+    ResultPath: $.BatchJobDetails.Postprocess
+    Next: PostprocessReadOutput
+    Retry: *BatchRetryConfig
+    Catch:
+      - ErrorEquals: ["States.ALL"]
+        ResultPath: $.BatchJobError.PostprocessEC2
+        Next: PostprocessReadOutput
+  PostprocessReadOutput:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    Parameters: *ReadOutputParameters
+    OutputPath: $.Payload
+    Next: PostprocessSucceeded
+    Catch:
+      - ErrorEquals: ["States.ALL"]
+        Next: PostprocessFailed
+  PostprocessFailed:
+    Type: Pass
+    Next: HandleFailure
+  PostprocessSucceeded:
+    Type: Pass
+    Next: ExperimentalSPOT
+  ExperimentalSPOT:
+    Type: Task
+    Resource: arn:aws:states:::batch:submitJob.sync
+    Parameters:
+      JobQueue: "${batch_spot_job_queue_arn}"
+      JobName.$: $$.Execution.Name
+      JobDefinition: *JobDefinition
+      Timeout: &ExperimentalBatchTimeout
+        AttemptDurationSeconds: 36000 # 10 hours
+      ContainerOverrides:
+        Memory.$: $.ExperimentalSPOTMemory
+        Environment: &ExperimentalEnvironment
+          - Name: WDL_INPUT_URI
+            Value.$: $.EXPERIMENTAL_INPUT_URI
+          - Name: WDL_WORKFLOW_URI
+            Value.$: $.EXPERIMENTAL_WDL_URI
+          - Name: WDL_OUTPUT_URI
+            Value.$: $.EXPERIMENTAL_OUTPUT_URI
+          - Name: SFN_EXECUTION_ID
+            Value.$: $$.Execution.Id
+          - Name: SFN_CURRENT_STATE
+            Value.$: $$.State.Name
+    ResultPath: $.BatchJobDetails.Experimental
+    Next: ExperimentalReadOutput
+    Retry: *BatchRetryConfig
+    Catch:
+      - ErrorEquals: ["States.ALL"]
+        ResultPath: $.BatchJobError.ExperimentalSPOT
+        Next: ExperimentalGetCause
+  ExperimentalGetCause:
+    Type: Pass
+    Parameters:
+      "Cause.$": "States.StringToJson($.BatchJobError.ExperimentalSPOT.Cause)"
+    ResultPath: "$.BatchJobError.ExperimentalSPOT"
+    Next: ExperimentalDetectError
+  ExperimentalDetectError:
+    Type: Choice
+    Choices:
+      - Variable: "$.BatchJobError.ExperimentalSPOT.Cause.StatusReason"
+        StringMatches: "Host EC2 (instance i-*) terminated."
+        Next: ExperimentalEC2
+    Default: ExperimentalReadOutput
+  ExperimentalEC2:
+    Type: Task
+    Resource: arn:aws:states:::batch:submitJob.sync
+    Parameters:
+      JobQueue: "${batch_on_demand_job_queue_arn}"
+      JobName.$: $$.Execution.Name
+      JobDefinition: *JobDefinition
+      Timeout: *ExperimentalBatchTimeout
+      ContainerOverrides:
+        Memory.$: $.ExperimentalEC2Memory
+        Environment: *ExperimentalEnvironment
+    ResultPath: $.BatchJobDetails.Experimental
+    Next: ExperimentalReadOutput
+    Retry: *BatchRetryConfig
+    Catch:
+      - ErrorEquals: ["States.ALL"]
+        ResultPath: $.BatchJobError.ExperimentalEC2
+        Next: ExperimentalReadOutput
+  ExperimentalReadOutput:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    Parameters: *ReadOutputParameters
+    OutputPath: $.Payload
+    Next: ExperimentalSucceeded
+    Catch:
+      - ErrorEquals: ["States.ALL"]
+        Next: ExperimentalFailed
+  ExperimentalFailed:
+    Type: Pass
+    Next: HandleFailure
+  ExperimentalSucceeded:
+    Type: Pass
+    Next: HandleSuccess
+  HandleSuccess:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    Parameters:
+      FunctionName: "${handle_success_lambda_name}"
+      Payload: *PassthroughStatePayload
+    OutputPath: $.Payload
+    End: true
+  HandleFailure:
+    # The HandleFailure state is expected to read error details, do any housekeeping necessary, then raise an exception
+    # with the error details (so they can be seen directly in the Step Functions API).
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    Parameters:
+      FunctionName: "${handle_failure_lambda_name}"
+      Payload: *PassthroughStatePayload
+    OutputPath: $.Payload
+    End: true

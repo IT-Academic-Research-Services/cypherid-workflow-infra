@@ -1,0 +1,31 @@
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="==MYBOUNDARY=="
+
+--==MYBOUNDARY==
+Content-Type: text/cloud-boothook; charset="us-ascii"
+
+#!/bin/bash -ex
+
+##############################################
+# Mount drives
+##############################################
+
+yum install -y mdadm amazon-ssm-agent
+
+# Create the RAID array
+ebs_devices=(/dev/sd?)
+if [ ! -e /dev/md0 ]
+then
+    mdadm --create /dev/md0 --force --auto=yes --level=0 --chunk=256 --raid-devices=${#ebs_devices[@]} ${ebs_devices[@]}
+    mkfs.xfs /dev/md0
+fi
+
+mount /dev/md0 /mnt
+
+##############################################
+# Configure Docker to use NVME for scratch space
+##############################################
+
+cloud-init-per once docker_options echo '{"data-root": "/mnt/docker"}' >> /etc/docker/daemon.json
+
+--==MYBOUNDARY==--

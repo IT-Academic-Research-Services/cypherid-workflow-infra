@@ -1,0 +1,32 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:Get*"
+      ],
+      "Resource": [
+        "arn:aws:secretsmanager:*:$AWS_ACCOUNT_ID:secret:$APP_NAME/$DEPLOYMENT_ENVIRONMENT/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:*:*:*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:PutMetricData",
+        "iam:ListAccountAliases"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

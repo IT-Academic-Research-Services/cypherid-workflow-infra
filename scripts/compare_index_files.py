@@ -1,0 +1,1 @@
+../workflows/docker-index-generation/compare_index_files.py

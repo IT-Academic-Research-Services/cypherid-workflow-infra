@@ -1,0 +1,3 @@
+index-generation-lambda.zip
+modules/*/chalice.tf.json
+modules/*/deployment.zip

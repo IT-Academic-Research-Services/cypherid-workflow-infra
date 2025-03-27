@@ -1,0 +1,3 @@
+boto3~=1.26.71
+chalice~=1.27.3 
+slack-sdk~=3.19.5 

@@ -1,0 +1,4 @@
+*/.chalice/policy-*.json
+*/.chalice/deployments/
+*/.chalice/venv/
+*/.chalice/.venv/

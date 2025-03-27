@@ -1,0 +1,71 @@
+# Resolve the location of this file and set APP_HOME to the root
+if [[ -n "$ZSH_VERSION" ]]; then
+    export APP_HOME=${0:A:h}
+else
+    SOURCE="${BASH_SOURCE[0]}"
+    while [ -h "$SOURCE" ] ; do SOURCE="$(readlink "$SOURCE")"; done
+    export APP_HOME="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+fi
+
+if [[ $APP_NAME == idseq ]]; then
+    echo Already in an idseq environment, please start a new terminal session or unset APP_NAME
+else
+    set -a
+    APP_NAME=idseq
+    DEPLOYMENT_ENVIRONMENT="${DEPLOYMENT_ENVIRONMENT:-dev}"
+
+    TF_DATA_DIR=".terraform.${DEPLOYMENT_ENVIRONMENT}"
+
+    if [[ "$DEPLOYMENT_ENVIRONMENT" == "test" ]]; then
+        AWS_DEFAULT_REGION=us-west-2
+        AWS_ACCOUNT_ID=123456789012
+        TFSTATE_FILE="terraform.tfstate"
+        AWS_ACCOUNT_ALIAS=idseq-local
+    else
+        AWS_DEFAULT_REGION=$(aws configure get region)
+        AWS_ACCOUNT_ID=$(aws sts get-caller-identity | jq -r .Account)
+        TFSTATE_FILE="${TF_DATA_DIR}/remote.tfstate"
+
+        EXPECT_ALIAS=${EXPECT_AWS_ACCOUNT_ALIAS:-idseq-dev}
+        AWS_ACCOUNT_ALIAS=$(aws iam list-account-aliases | jq -r '.AccountAliases[0]')
+        if [[ $AWS_ACCOUNT_ALIAS != $EXPECT_ALIAS ]]; then
+            echo "ERROR: Expected to be in AWS account $EXPECT_ALIAS, but got $AWS_ACCOUNT_ALIAS" 1>&2
+            echo "ERROR: If this is expected, set the EXPECT_AWS_ACCOUNT_ALIAS environment variable" 1>&2
+            unset APP_HOME APP_NAME DEPLOYMENT_ENVIRONMENT TF_DATA_DIR TFSTATE_FILE
+            return
+        fi
+    fi
+
+    TF_CLI_ARGS_output="--state ${TFSTATE_FILE}"
+    TF_CLI_ARGS_init="--backend-config ${APP_HOME}/${TF_DATA_DIR}/aws_config.json"
+
+    # See https://github.com/terraform-providers/terraform-provider-aws/issues/1184
+    AWS_SDK_LOAD_CONFIG=1
+
+    OWNER=idseqteam@chanzuckerberg.com
+    TF_S3_BUCKET=tfstate-$AWS_ACCOUNT_ID
+
+    if [[ $DEPLOYMENT_ENVIRONMENT == test ]] && [[ -n $GITHUB_ACTIONS ]]; then
+        DOCKER_REGISTRY="docker.pkg.github.com/${GITHUB_REPOSITORY}"
+    else
+        DOCKER_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
+    fi
+
+    ALERTS_SLACK_CHANNEL="#proj-czid-ops"
+    # ALERTS_SLACK_CHANNEL_ID corresponds to the channel "#proj-czid-ops"
+    ALERTS_SLACK_CHANNEL_ID="C0244PW714J"
+    SLACK_OAUTH_TOKEN_SECRET_NAME="idseq/${DEPLOYMENT_ENVIRONMENT}/slack_oauth_token"
+
+    EXPORT_ENV_VARS_TO_TF="DEPLOYMENT_ENVIRONMENT OWNER AWS_ACCOUNT_ID AWS_ACCOUNT_ALIAS AWS_DEFAULT_REGION DOCKER_REGISTRY ALERTS_SLACK_CHANNEL ALERTS_SLACK_CHANNEL_ID SLACK_OAUTH_TOKEN_SECRET_NAME"
+    set +a
+
+    for v in $( echo "$EXPORT_ENV_VARS_TO_TF" ); do
+        if [[ -n "$ZSH_VERSION" ]]; then
+            echo "variable $v { default = \"${(P)v}\" }";
+        else
+            echo "variable $v { default = \"${!v}\" }";
+        fi
+    done > "${APP_HOME}/terraform/variables.tf"
+
+    PS1="($APP_NAME:$DEPLOYMENT_ENVIRONMENT) ${PS1/\(idseq:*\) /}"
+fi

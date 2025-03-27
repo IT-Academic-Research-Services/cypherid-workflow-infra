@@ -1,0 +1,45 @@
+#!/bin/bash
+
+set -eu
+
+echo 'APT::Install-Recommends "false";' > /etc/apt/apt.conf.d/98idseq
+echo 'APT::Install-Suggests "false";' > /etc/apt/apt.conf.d/99idseq
+apt-get -q update
+apt-get -q install -y jq awscli python3-pip docker.io httpie
+pip3 install awscli==1.17.14
+
+
+token=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+export AWS_DEFAULT_REGION=$(curl -s -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)
+aws configure set default.region $AWS_DEFAULT_REGION
+aws_account_id=$(curl -s -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .accountId)
+ec2_instance_id=$(curl -s -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .instanceId)
+github_repo=$(aws ec2 describe-tags --filters "Name=resource-id,Values=$ec2_instance_id" | jq -r '.Tags[] | select(.Key == "github-repo") | .Value')
+
+actions_runner_url=https://github.com/actions/runner/releases/download/v${ACTIONS_RUNNER_VERSION}/actions-runner-linux-x64-${ACTIONS_RUNNER_VERSION}.tar.gz
+actions_runner_token=$(aws secretsmanager get-secret-value --secret-id idseq/${DEPLOYMENT_ENVIRONMENT}/$github_repo/github_runner_token | jq -r .SecretString)
+actions_runner_name="idseq-aws-$aws_account_id-$ec2_instance_id"
+
+mkdir -p /opt/actions-runner
+cd /opt/actions-runner
+curl -L $actions_runner_url | tar -xz
+chown -R ubuntu /opt/actions-runner
+
+sudo -u ubuntu ./config.sh --unattended --name "$actions_runner_name" --labels idseq-${DEPLOYMENT_ENVIRONMENT} --url https://github.com/chanzuckerberg/$github_repo --token "$actions_runner_token"
+./svc.sh install
+./svc.sh start
+
+if [$github_repo = 'idseq']; then
+  github_repo='czid-workflows'
+  mkdir -p /opt/workflows-runner
+  chown -R ubuntu /opt/workflows-runner
+  cd /opt/workflows-runner
+  curl -L $actions_runner_url | tar -xz
+  actions_runner_token=$(aws secretsmanager get-secret-value --secret-id idseq/${DEPLOYMENT_ENVIRONMENT}/$github_repo/github_runner_token | jq -r .SecretString)
+  sudo -u ubuntu ./config.sh --unattended --name "$actions_runner_name" --labels idseq-${DEPLOYMENT_ENVIRONMENT} --url https://github.com/chanzuckerberg/$github_repo --token "$actions_runner_token"
+  ./svc.sh install
+  ./svc.sh start
+fi 
+
+echo -e '#!/bin/sh\nsudo docker system prune --all -f\nsudo docker image prune --all -f' | sudo tee -a /etc/cron.daily/docker-prune
+sudo chmod +x /etc/cron.daily/docker-prune

@@ -1,0 +1,212 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:List*",
+        "s3:Get*"
+      ],
+      "Resource": [
+        "arn:aws:s3:::idseq-public-references",
+        "arn:aws:s3:::idseq-public-references/*",
+        "arn:aws:s3:::czid-public-references",
+        "arn:aws:s3:::czid-public-references/*",
+        "arn:aws:s3:::idseq-database",
+        "arn:aws:s3:::idseq-database/*",
+        "arn:aws:s3:::aegea-batch-jobs-${AWS_ACCOUNT_ID}",
+        "arn:aws:s3:::aegea-batch-jobs-${AWS_ACCOUNT_ID}/*",
+        "arn:aws:s3:::idseq-${DEPLOYMENT_ENVIRONMENT}-*",
+        "arn:aws:s3:::idseq-${DEPLOYMENT_ENVIRONMENT}-*/*",
+        "arn:aws:s3:::idseq-bench",
+        "arn:aws:s3:::idseq-bench/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:List*",
+        "s3:GetObject*",
+        "s3:PutObject*",
+        "s3:CreateMultipartUpload"
+      ],
+      "Resource": [
+        "arn:aws:s3:::idseq-samples-development",
+        "arn:aws:s3:::idseq-samples-development/*",
+        "arn:aws:s3:::idseq-samples-staging",
+        "arn:aws:s3:::idseq-samples-staging/*",
+        "arn:aws:s3:::idseq-workflows",
+        "arn:aws:s3:::idseq-workflows/*",
+        "arn:aws:s3:::tfstate-${AWS_ACCOUNT_ID}",
+        "arn:aws:s3:::tfstate-${AWS_ACCOUNT_ID}/*",
+        "arn:aws:s3:::idseq-staging-heatmap",
+        "arn:aws:s3:::idseq-staging-heatmap/*",
+        "arn:aws:s3:::idseq-${DEPLOYMENT_ENVIRONMENT}-heatmap",
+        "arn:aws:s3:::idseq-${DEPLOYMENT_ENVIRONMENT}-heatmap/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "batch:*",
+        "events:*",
+        "states:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "lambda:*",
+      "Resource": [
+        "arn:aws:lambda:*:${AWS_ACCOUNT_ID}:function:*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": "secretsmanager:*",
+      "Resource": [
+        "arn:aws:secretsmanager:*:${AWS_ACCOUNT_ID}:secret:idseq/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": [
+        "arn:aws:iam::${AWS_ACCOUNT_ID}:role/idseq-dev-*",
+        "arn:aws:iam::${AWS_ACCOUNT_ID}:role/idseq-staging-*",
+        "arn:aws:iam::${AWS_ACCOUNT_ID}:role/idseq-${DEPLOYMENT_ENVIRONMENT}-*",
+        "arn:aws:iam::${AWS_ACCOUNT_ID}:role/idseq-swipe-dev-*",
+        "arn:aws:iam::${AWS_ACCOUNT_ID}:role/idseq-swipe-staging-*",
+        "arn:aws:iam::${AWS_ACCOUNT_ID}:role/idseq-swipe-${DEPLOYMENT_ENVIRONMENT}-*",
+        "arn:aws:iam::${AWS_ACCOUNT_ID}:role/idseq-web-*"
+      ]
+    },
+    {
+      "Sid": "MinimalPackerPermissions",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:AttachVolume",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:CopyImage",
+        "ec2:CreateImage",
+        "ec2:CreateKeypair",
+        "ec2:CreateSecurityGroup",
+        "ec2:CreateSnapshot",
+        "ec2:CreateTags",
+        "ec2:CreateVolume",
+        "ec2:DeleteKeyPair",
+        "ec2:DeleteSecurityGroup",
+        "ec2:DeleteSnapshot",
+        "ec2:DeleteVolume",
+        "ec2:DeregisterImage",
+        "ec2:DescribeImageAttribute",
+        "ec2:DescribeImages",
+        "ec2:DescribeInstances",
+        "ec2:DescribeInstanceStatus",
+        "ec2:DescribeRegions",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeSnapshots",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeTags",
+        "ec2:DescribeVolumes",
+        "ec2:DetachVolume",
+        "ec2:GetPasswordData",
+        "ec2:ModifyImageAttribute",
+        "ec2:ModifyInstanceAttribute",
+        "ec2:ModifySnapshotAttribute",
+        "ec2:RegisterImage",
+        "ec2:RunInstances",
+        "ec2:StopInstances",
+        "ec2:TerminateInstances"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "UpdateLaunchTemplatePermissions",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateLaunchTemplate*",
+        "ec2:DescribeLaunchTemplate*",
+        "ec2:DeleteLaunchTemplate*",
+        "ec2:ModifyLaunchTemplate"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "sqs:*",
+      "Resource": [
+        "arn:aws:sqs:*:${AWS_ACCOUNT_ID}:idseq-dev-*",
+        "arn:aws:sqs:*:${AWS_ACCOUNT_ID}:idseq-staging-*",
+        "arn:aws:sqs:*:${AWS_ACCOUNT_ID}:idseq-${DEPLOYMENT_ENVIRONMENT}-*",
+        "arn:aws:sqs:*:${AWS_ACCOUNT_ID}:idseq-swipe-*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ssm:DescribeParameters"
+      ],
+      "Resource": [
+        "*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetParameters",
+        "ssm:GetParametersByPath",
+        "ssm:ListTagsForResource",
+        "ssm:PutParameter"
+      ],
+      "Resource": [
+        "arn:aws:ssm:*:${AWS_ACCOUNT_ID}:parameter/idseq-dev-*",
+        "arn:aws:ssm:*:${AWS_ACCOUNT_ID}:parameter/idseq-staging-*",
+        "arn:aws:ssm:*:${AWS_ACCOUNT_ID}:parameter/idseq-${DEPLOYMENT_ENVIRONMENT}-*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:UpdateService",
+        "ecs:DescribeServices",
+        "ecs:DescribeTasks",
+        "ecs:RunTask"
+      ],
+      "Resource": [
+        "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:service/staging/*",
+        "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:service/idseq-sandbox-ecs/*",
+        "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:service/idseq-prod-ecs/*",
+        "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:task-definition/idseq-sandbox-web:*",
+        "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:task-definition/idseq-staging-web:*",
+        "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:task-definition/idseq-prod-web:*",
+        "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:task/idseq-sandbox-ecs/*",
+        "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:task/staging/*",
+        "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:task/idseq-prod-ecs/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:RegisterTaskDefinition",
+        "ecs:DescribeTaskDefinition",
+        "ecs:DeregisterTaskDefinition"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+          "cloudwatch:PutMetricData"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "kms:Describe*"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
