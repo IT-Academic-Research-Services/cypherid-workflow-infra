@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 jobs:
-  AssumeRoleAndCallIdentity:
+  DeployTerraform:
     runs-on: ubuntu-latest
     steps:
       - name: Git clone the repository
@@ -33,6 +33,11 @@ jobs:
       - name: Sts GetCallerIdentity
         run: |
           aws sts get-caller-identity
+      - name: Install initial tools required by report_deployment_status.sh
+        run: |
+          sudo apt-get update
+          sudo apt-get install jq
+          sudo apt-get install -y httpie
       - name: Deploy dev
         run: |
           trap 'scripts/report_deployment_status.sh failure' ERR
