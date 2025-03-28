@@ -9,6 +9,7 @@ deploy_creator=$(jq -r .sender.login "$GITHUB_EVENT_PATH")
 deploy_env=$(jq -r .deployment.environment "$GITHUB_EVENT_PATH")
 deploy_payload=$(jq -rc .deployment.payload "$GITHUB_EVENT_PATH")
 statuses_url=$(jq -r .deployment.statuses_url "$GITHUB_EVENT_PATH")
+echo "Vars: status=$status description=$description deploy_url=$deploy_url deploy_creator=$deploy_creator deploy_env=$deploy_env deploy_payload=$deploy_payload statuses_url=$statuses_url"
 jq -n '.state=env.status | .description=env.description' | http --check-status --timeout=30 POST "$statuses_url" Authorization:"token $GITHUB_TOKEN" Accept:"application/vnd.github.flash-preview+json"
 
 # slack_api=https://slack.com/api/chat.postMessage
