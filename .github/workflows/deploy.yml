@@ -32,3 +32,9 @@ jobs:
       - name: Sts GetCallerIdentity
         run: |
           aws sts get-caller-identity
+      - name: Deploy dev
+        run: |
+          trap 'scripts/report_deployment_status.sh failure' ERR
+          scripts/report_deployment_status.sh in_progress "Starting deployment"
+          source scripts/init_ci_runner.sh
+          make deploy
