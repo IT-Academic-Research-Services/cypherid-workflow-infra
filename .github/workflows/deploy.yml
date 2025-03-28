@@ -1,0 +1,34 @@
+name: CypherID Workflow Infra Deploy
+run-name: Deploy CypherID Workflow Infra to ${{ inputs.environment }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'The environment to which to deploy'
+        required: false
+        type: string
+        default: 'dev'
+
+env:
+  AWS_REGION : us-west-2
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  AssumeRoleAndCallIdentity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Git clone the repository
+        uses: actions/checkout@v3
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v1.7.0
+        with:
+          role-to-assume: arn:aws:iam::941377154785:role/gha-cypherid-workflow-infra-terraform #change to reflect your IAM role’s ARN
+          role-session-name: GitHub_to_AWS_via_FederatedOIDC
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Sts GetCallerIdentity
+        run: |
+          aws sts get-caller-identity
