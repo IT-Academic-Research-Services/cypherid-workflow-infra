@@ -40,7 +40,7 @@ jobs:
           sudo apt-get install -y httpie
       - name: Output GH Event Data
         run: |
-          echo $GITHUB_EVENT_PATH | jq
+          echo $GITHUB_EVENT_PATH
     #   - name: Deploy dev
     #     run: |
     #       trap 'scripts/report_deployment_status.sh failure' ERR
