@@ -12,6 +12,7 @@ on:
 
 env:
   AWS_REGION : us-west-2
+  GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
 
 permissions:
   id-token: write
