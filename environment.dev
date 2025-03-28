@@ -8,5 +8,5 @@ else
 fi
 
 export DEPLOYMENT_ENVIRONMENT=dev
-export EXPECT_AWS_ACCOUNT_ALIAS=idseq-dev
+export EXPECT_AWS_ACCOUNT_ALIAS=cypherid-dev
 source "${APP_HOME}/environment"

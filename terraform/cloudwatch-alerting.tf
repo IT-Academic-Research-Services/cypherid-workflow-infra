@@ -1,4 +1,5 @@
 module "cloudwatch-alerting" {
+  count = 0
   source                 = "./modules/cloudwatch-alerting"
   deployment_environment = var.DEPLOYMENT_ENVIRONMENT
   # Module count/for_each are scheduled for release in Terraform 0.13.

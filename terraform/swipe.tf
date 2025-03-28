@@ -53,12 +53,12 @@ module "swipe" {
       path                = "${path.module}/sfn_templates/short-read-mngs.yml",
       extra_template_vars = {},
     },
-    "index-generation" : {
-      path = "${path.module}/sfn_templates/index-generation.yml",
-      extra_template_vars = {
-        "index_generation_job_queue_arn" : aws_batch_job_queue.index_generation_job_queue.arn,
-      },
-    },
+    # "index-generation" : {
+    #   path = "${path.module}/sfn_templates/index-generation.yml",
+    #   extra_template_vars = {
+    #     "index_generation_job_queue_arn" : aws_batch_job_queue.index_generation_job_queue.arn,
+    #   },
+    # },
   }
   stage_memory_defaults = {
     Run : {

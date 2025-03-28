@@ -42,8 +42,8 @@ else
     # See https://github.com/terraform-providers/terraform-provider-aws/issues/1184
     AWS_SDK_LOAD_CONFIG=1
 
-    OWNER=idseqteam@chanzuckerberg.com
-    TF_S3_BUCKET=tfstate-$AWS_ACCOUNT_ID
+    OWNER=nicolas.grande@ucsf.edu
+    TF_S3_BUCKET=tfstate-$AWS_ACCOUNT_ID-test
 
     if [[ $DEPLOYMENT_ENVIRONMENT == test ]] && [[ -n $GITHUB_ACTIONS ]]; then
         DOCKER_REGISTRY="docker.pkg.github.com/${GITHUB_REPOSITORY}"
@@ -51,10 +51,10 @@ else
         DOCKER_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
     fi
 
-    ALERTS_SLACK_CHANNEL="#proj-czid-ops"
+    ALERTS_SLACK_CHANNEL=""
     # ALERTS_SLACK_CHANNEL_ID corresponds to the channel "#proj-czid-ops"
-    ALERTS_SLACK_CHANNEL_ID="C0244PW714J"
-    SLACK_OAUTH_TOKEN_SECRET_NAME="idseq/${DEPLOYMENT_ENVIRONMENT}/slack_oauth_token"
+    ALERTS_SLACK_CHANNEL_ID=""
+    SLACK_OAUTH_TOKEN_SECRET_NAME=""
 
     EXPORT_ENV_VARS_TO_TF="DEPLOYMENT_ENVIRONMENT OWNER AWS_ACCOUNT_ID AWS_ACCOUNT_ALIAS AWS_DEFAULT_REGION DOCKER_REGISTRY ALERTS_SLACK_CHANNEL ALERTS_SLACK_CHANNEL_ID SLACK_OAUTH_TOKEN_SECRET_NAME"
     set +a
