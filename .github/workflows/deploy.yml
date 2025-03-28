@@ -38,9 +38,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install jq
           sudo apt-get install -y httpie
-      - name: Deploy dev
+      - name: Output GH Event Data
         run: |
-          trap 'scripts/report_deployment_status.sh failure' ERR
-          scripts/report_deployment_status.sh in_progress "Starting deployment"
-          source scripts/init_ci_runner.sh
-          make deploy
+          echo $GITHUB_EVENT_PATH | jq
+    #   - name: Deploy dev
+    #     run: |
+    #       trap 'scripts/report_deployment_status.sh failure' ERR
+    #       scripts/report_deployment_status.sh in_progress "Starting deployment"
+    #       source scripts/init_ci_runner.sh
+    #       make deploy
