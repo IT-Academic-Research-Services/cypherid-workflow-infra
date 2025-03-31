@@ -22,7 +22,7 @@ else
         TFSTATE_FILE="terraform.tfstate"
         AWS_ACCOUNT_ALIAS=idseq-local
     else
-        AWS_DEFAULT_REGION=$(aws configure get region)
+        #AWS_DEFAULT_REGION=$(aws configure get region)
         AWS_ACCOUNT_ID=$(aws sts get-caller-identity | jq -r .Account)
         TFSTATE_FILE="${TF_DATA_DIR}/remote.tfstate"
 
