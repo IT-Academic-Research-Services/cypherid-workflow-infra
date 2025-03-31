@@ -116,6 +116,7 @@ resource "aws_batch_compute_environment" "alignment_compute_environment" {
     })
 
     image_id     = data.aws_ssm_parameter.idseq_batch_ami.value
+    #TODO: Is this needed?
     ec2_key_pair = "idseq-${var.deployment_environment}"
     # TODO: set up per-environment vcpu limits
     min_vcpus          = lookup(var.min_vcpus, var.deployment_environment, var.min_vcpus["default"])[each.value["provisioning_model"]]

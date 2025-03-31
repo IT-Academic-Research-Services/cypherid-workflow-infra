@@ -101,6 +101,7 @@
 #     })
 
 #     image_id           = data.aws_ssm_parameter.idseq_batch_ami.value
+#     #TODO: Is this needed?
 #     ec2_key_pair       = "idseq-${var.DEPLOYMENT_ENVIRONMENT}"
 #     min_vcpus          = 0
 #     desired_vcpus      = 0

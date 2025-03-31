@@ -3,6 +3,7 @@ data "aws_kms_alias" "parameter_store" {
 
   name = "alias/parameter_store_key"
 }
+// TODO: Create KMS key here
 
 resource "aws_iam_policy" "idseq_batch_main_job" {
   name = "idseq-${var.DEPLOYMENT_ENVIRONMENT}-batch-job"
