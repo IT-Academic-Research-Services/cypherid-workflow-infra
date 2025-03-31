@@ -13,6 +13,7 @@ on:
 env:
   AWS_REGION : us-west-2
   GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+  DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment }}
 
 permissions:
   id-token: write
@@ -27,7 +28,7 @@ jobs:
       - name: configure aws credentials
         uses: aws-actions/configure-aws-credentials@v1.7.0
         with:
-          role-to-assume: arn:aws:iam::941377154785:role/gha-cypherid-workflow-infra-terraform #change to reflect your IAM role’s ARN
+          role-to-assume: arn:aws:iam::941377154785:role/gha-cypherid-workflow-infra-terraform
           role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
       - name: Sts GetCallerIdentity

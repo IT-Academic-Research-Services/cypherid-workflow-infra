@@ -26,4 +26,8 @@ pip install -r requirements-dev.txt
 
 set -x
 
-source environment
+if [[ -n "$DEPLOYMENT_ENVIRONMENT" ]]; then
+    source environment.$DEPLOYMENT_ENVIRONMENT
+else
+    source environment
+fi
