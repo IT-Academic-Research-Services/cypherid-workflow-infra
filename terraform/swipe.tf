@@ -84,7 +84,7 @@ module "swipe" {
   }
 
   workspace_s3_prefixes = lookup({
-    "dev" : ["idseq-samples-development", "idseq-database", "idseq-samples-sandbox"],
+    "dev" : ["idseq-samples-development", "idseq-database", "idseq-samples-sandbox", "cypherid-samples-deleteme"],
     "prod" : ["idseq-prod-samples-us-west-2", "czid-public-references", "idseq-prod-system-test"],
   }, var.DEPLOYMENT_ENVIRONMENT, ["idseq-samples-${var.DEPLOYMENT_ENVIRONMENT}", "idseq-database"])
 
