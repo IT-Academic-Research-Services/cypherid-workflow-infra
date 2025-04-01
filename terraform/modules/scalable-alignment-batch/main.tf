@@ -2,11 +2,7 @@ locals {
   service_name        = "idseq-${var.deployment_environment}-${var.alignment_algorithm}"
   provisioning_models = ["EC2", "SPOT"]
   common_tags = {
-    managedBy = "terraform"
-    project   = "idseq"
-    env       = var.deployment_environment
     service   = local.service_name
-    owner     = var.owner
   }
 }
 

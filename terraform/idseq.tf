@@ -1,13 +1,3 @@
-locals {
-  common_tags = {
-    managedBy = "terraform"
-    project   = "idseq"
-    env       = var.DEPLOYMENT_ENVIRONMENT
-    service   = "main"
-    owner     = var.OWNER
-  }
-}
-
 module "pipeline-monitor-restarter" {
   source = "./modules/pipeline-monitor-restarter"
 }

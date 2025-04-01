@@ -3,7 +3,6 @@ resource "aws_iam_role" "idseq_batch_alignment_instance_role" {
   assume_role_policy = templatefile("${path.module}/../../iam_policy_templates/trust_policy.json", {
     trust_services = ["ec2"]
   })
-  tags = local.common_tags
 }
 
 resource "aws_iam_role_policy_attachment" "idseq_batch_alignment_instance_role_put_metric" {

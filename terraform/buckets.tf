@@ -91,10 +91,10 @@ resource "aws_s3_bucket" "czid-public-references" {
       }
     }
   }
-  tags = merge(local.common_tags, {
+  tags = {
     public_read_justification = "CZ ID bioinformatics references derived from open data",
     bucket_contents           = "Bioinformatics reference databases"
-  })
+  }
 }
 
 resource "aws_s3_bucket_policy" "czid-public-references" {

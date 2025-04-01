@@ -8,5 +8,6 @@ else
 fi
 
 export DEPLOYMENT_ENVIRONMENT=dev
+export TF_VAR_environment="${DEPLOYMENT_ENVIRONMENT}"
 export EXPECT_AWS_ACCOUNT_ALIAS=cypherid-dev
 source "${APP_HOME}/environment"

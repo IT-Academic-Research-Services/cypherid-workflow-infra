@@ -10,6 +10,4 @@ resource "aws_ecr_repository" "workflow-repositories" {
   image_scanning_configuration {
     scan_on_push = true
   }
-
-  tags = local.common_tags
 }

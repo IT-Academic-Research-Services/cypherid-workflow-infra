@@ -1,3 +1,10 @@
+variable "environment" { type = string }
+variable "app_name" { 
+    type = string
+    default = "idseq"
+}
+variable "owner" { type = string }
+
 terraform {
   required_version = ">= 1.11.3"
   required_providers {
@@ -8,6 +15,17 @@ terraform {
   backend "s3" {
     region = "us-west-2"
   }
+}
+
+provider "aws" {
+  default_tags {
+      tags = {
+        environment = var.environment
+        owner = var.owner
+        application = var.app_name
+        managedBy = "terraform"
+      }
+    }
 }
 
 module "idseq" {

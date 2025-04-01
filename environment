@@ -43,6 +43,7 @@ else
     AWS_SDK_LOAD_CONFIG=1
 
     OWNER=nicolas.grande@ucsf.edu
+    TF_VAR_owner="${OWNER}"
     TF_S3_BUCKET=tfstate-$AWS_ACCOUNT_ID-test
 
     if [[ $DEPLOYMENT_ENVIRONMENT == test ]] && [[ -n $GITHUB_ACTIONS ]]; then
