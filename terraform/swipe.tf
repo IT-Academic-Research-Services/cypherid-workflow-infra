@@ -1,5 +1,5 @@
 module "swipe" {
-  source = "github.com/chanzuckerberg/swipe?ref=v1.4.6"
+  source = "github.com/chanzuckerberg/swipe?ref=v1.4.8-no-s3parcp"
 
   app_name        = "idseq-swipe-${var.DEPLOYMENT_ENVIRONMENT}"
   job_policy_arns = [aws_iam_policy.idseq_batch_main_job.arn, "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"]
