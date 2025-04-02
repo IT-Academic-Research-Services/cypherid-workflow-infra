@@ -47,14 +47,15 @@ resource "aws_s3_bucket" "cypherid-public-references" {
   }
 }
 
-resource "aws_s3_bucket_policy" "cypherid-public-references" {
-  bucket = aws_s3_bucket.cypherid-public-references.bucket
+#Removed because we don't need to make the bucket public for now, and shouldn't need to delegate access to another account
+# resource "aws_s3_bucket_policy" "cypherid-public-references" {
+#   bucket = aws_s3_bucket.cypherid-public-references.bucket
 
-  policy = templatefile("${path.module}/iam_policy_templates/s3-delegate-access.json", {
-    delegated_arns = ["arn:aws:iam::941377154785:root"],
-    bucket_name    = aws_s3_bucket.cypherid-public-references.bucket
-  })
-}
+#   policy = templatefile("${path.module}/iam_policy_templates/s3-delegate-access.json", {
+#     delegated_arns = ["arn:aws:iam::941377154785:root"],
+#     bucket_name    = aws_s3_bucket.cypherid-public-references.bucket
+#   })
+# }
 
 //TODO Assuming we do not need this
 resource "aws_s3_bucket" "idseq-prod-system-test" {
