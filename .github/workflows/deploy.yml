@@ -6,7 +6,7 @@ on:
     inputs:
       environment:
         description: 'The environment to which to deploy'
-        required: false
+        required: true
         type: string
         default: 'dev'
 
@@ -24,11 +24,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Git clone the repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: configure aws credentials
-        uses: aws-actions/configure-aws-credentials@v1.7.0
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::941377154785:role/gha-cypherid-workflow-infra-terraform
+          role-to-assume: arn:aws:iam::941377154785:role/gha-seqtoid
           role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
       - name: Sts GetCallerIdentity

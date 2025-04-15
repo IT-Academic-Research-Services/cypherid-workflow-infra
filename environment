@@ -42,7 +42,7 @@ else
     # See https://github.com/terraform-providers/terraform-provider-aws/issues/1184
     AWS_SDK_LOAD_CONFIG=1
 
-    OWNER=nicolas.grande@ucsf.edu
+    OWNER=matt.jobin@ucsf.edu
     TF_VAR_owner="${OWNER}"
     TF_S3_BUCKET=tfstate-$AWS_ACCOUNT_ID-test
 
