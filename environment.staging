@@ -8,5 +8,5 @@ else
 fi
 
 export DEPLOYMENT_ENVIRONMENT=staging
-export EXPECT_AWS_ACCOUNT_ALIAS=idseq-dev
+export EXPECT_AWS_ACCOUNT_ALIAS=seqtoid-staging
 source "${APP_HOME}/environment"

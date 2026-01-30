@@ -31,10 +31,10 @@
         "s3:CreateMultipartUpload"
       ],
       "Resource": [
-        "arn:aws:s3:::idseq-samples-development",
-        "arn:aws:s3:::idseq-samples-development/*",
         "arn:aws:s3:::idseq-samples-staging",
         "arn:aws:s3:::idseq-samples-staging/*",
+        "arn:aws:s3:::idseq-samples-${DEPLOYMENT_ENVIRONMENT}-${AWS_ACCOUNT_ID}",
+        "arn:aws:s3:::idseq-samples-${DEPLOYMENT_ENVIRONMENT}-${AWS_ACCOUNT_ID}/*",
         "arn:aws:s3:::idseq-workflows",
         "arn:aws:s3:::idseq-workflows/*",
         "arn:aws:s3:::tfstate-${AWS_ACCOUNT_ID}",
@@ -175,13 +175,17 @@
       ],
       "Resource": [
         "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:service/staging/*",
+        "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:service/idseq-dev-ecs/*",
         "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:service/idseq-sandbox-ecs/*",
+        "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:service/idseq-staging-ecs/*",
         "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:service/idseq-prod-ecs/*",
+        "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:task-definition/idseq-dev-web:*",
         "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:task-definition/idseq-sandbox-web:*",
         "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:task-definition/idseq-staging-web:*",
         "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:task-definition/idseq-prod-web:*",
+        "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:task/idseq-dev-ecs/*",
         "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:task/idseq-sandbox-ecs/*",
-        "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:task/staging/*",
+        "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:task/idseq-staging-ecs/*",
         "arn:aws:ecs:*:${AWS_ACCOUNT_ID}:task/idseq-prod-ecs/*"
       ]
     },

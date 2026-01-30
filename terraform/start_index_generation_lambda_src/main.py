@@ -44,9 +44,7 @@ def start_index_generation(event, *args):
                 "docker_image_id": f"{aws_account_id}.dkr.ecr.{aws_region}.amazonaws.com/index-generation:{version}",
                 "write_to_db": True,
                 "index_name": index_name,
-                "env": "sandbox"
-                if deployment_environment == "dev"
-                else deployment_environment,
+                "env": deployment_environment,
                 "s3_dir": s3_dir,
                 "previous_lineages": f"s3://{bucket}/{previous_lineages}",
             },

@@ -6,7 +6,7 @@ variable "app_name" {
 variable "owner" { type = string }
 
 terraform {
-  required_version = ">= 1.11.3"
+  required_version = ">= 1.14.3"
   required_providers {
     aws = {
       version = "~> 4.54"
@@ -18,6 +18,7 @@ terraform {
 }
 
 provider "aws" {
+  region = "us-west-2"
   default_tags {
       tags = {
         environment = var.environment

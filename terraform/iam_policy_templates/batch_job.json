@@ -34,12 +34,14 @@
         "arn:aws:s3:::idseq-${DEPLOYMENT_ENVIRONMENT}-*/*",
         "arn:aws:s3:::idseq-samples-test",
         "arn:aws:s3:::idseq-samples-test/*",
-        "arn:aws:s3:::idseq-samples-development",
-        "arn:aws:s3:::idseq-samples-development/*",
+        "arn:aws:s3:::idseq-samples-dev",
+        "arn:aws:s3:::idseq-samples-dev/*",
         "arn:aws:s3:::idseq-samples-sandbox",
         "arn:aws:s3:::idseq-samples-sandbox/*",
         "arn:aws:s3:::idseq-samples-staging",
         "arn:aws:s3:::idseq-samples-staging/*",
+        "arn:aws:s3:::idseq-samples-${DEPLOYMENT_ENVIRONMENT}-${AWS_ACCOUNT_ID}",
+        "arn:aws:s3:::idseq-samples-${DEPLOYMENT_ENVIRONMENT}-${AWS_ACCOUNT_ID}/*",
         "arn:aws:s3:::idseq-samples-${DEPLOYMENT_ENVIRONMENT}",
         "arn:aws:s3:::idseq-samples-${DEPLOYMENT_ENVIRONMENT}/*"
       ]
@@ -59,10 +61,10 @@
         "ssm:GetParameter"
       ],
       "Resource": [
-        "arn:aws:ssm:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:parameter/idseq-${DEPLOYMENT_ENVIRONMENT == "dev" ? "sandbox" : DEPLOYMENT_ENVIRONMENT}-web/DB_PORT",
-        "arn:aws:ssm:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:parameter/idseq-${DEPLOYMENT_ENVIRONMENT == "dev" ? "sandbox" : DEPLOYMENT_ENVIRONMENT}-web/DB_USERNAME",
-        "arn:aws:ssm:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:parameter/idseq-${DEPLOYMENT_ENVIRONMENT == "dev" ? "sandbox" : DEPLOYMENT_ENVIRONMENT}-web/db_password",
-        "arn:aws:ssm:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:parameter/idseq-${DEPLOYMENT_ENVIRONMENT == "dev" ? "sandbox" : DEPLOYMENT_ENVIRONMENT}-web/RDS_ADDRESS"
+        "arn:aws:ssm:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:parameter/idseq-${DEPLOYMENT_ENVIRONMENT}-web/DB_PORT",
+        "arn:aws:ssm:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:parameter/idseq-${DEPLOYMENT_ENVIRONMENT}-web/DB_USERNAME",
+        "arn:aws:ssm:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:parameter/idseq-${DEPLOYMENT_ENVIRONMENT}-web/db_password",
+        "arn:aws:ssm:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:parameter/idseq-${DEPLOYMENT_ENVIRONMENT}-web/RDS_ADDRESS"
       ]
     }%{ if PARAMETER_KMS_KEY_ARN != "" },
     {

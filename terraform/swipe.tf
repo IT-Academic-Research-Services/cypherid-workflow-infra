@@ -83,10 +83,14 @@ module "swipe" {
     }
   }
 
-  workspace_s3_prefixes = lookup({
-    "dev" : ["idseq-samples-development", "idseq-database", "idseq-samples-sandbox", "cypherid-samples-deleteme", "idseq-samples-sandbox-941377154785"],
-    "prod" : ["idseq-prod-samples-us-west-2", "czid-public-references", "idseq-prod-system-test"],
-  }, var.DEPLOYMENT_ENVIRONMENT, ["idseq-samples-${var.DEPLOYMENT_ENVIRONMENT}", "idseq-database"])
+  workspace_s3_prefixes = lookup(
+    {
+      "dev" : [ "idseq-database", "cypherid-samples-deleteme", "idseq-samples-dev", "idseq-samples-dev-491013321714"],
+      "prod" : ["idseq-prod-samples-us-west-2", "czid-public-references", "idseq-prod-system-test"],
+    },
+    var.DEPLOYMENT_ENVIRONMENT,
+    ["idseq-samples-${var.DEPLOYMENT_ENVIRONMENT}", "idseq-samples-${var.DEPLOYMENT_ENVIRONMENT}-${var.AWS_ACCOUNT_ID}", "idseq-database"]
+  )
 
   extra_env_vars = {
     DEPLOYMENT_ENVIRONMENT = var.DEPLOYMENT_ENVIRONMENT,
