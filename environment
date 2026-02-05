@@ -44,6 +44,7 @@ else
 
     OWNER=matt.jobin@ucsf.edu
     TF_VAR_owner="${OWNER}"
+    TF_VAR_environment="${DEPLOYMENT_ENVIRONMENT}"
 
     if [[ $DEPLOYMENT_ENVIRONMENT == dev ]]; then
         TF_S3_BUCKET=tfstate-$AWS_ACCOUNT_ID-test
