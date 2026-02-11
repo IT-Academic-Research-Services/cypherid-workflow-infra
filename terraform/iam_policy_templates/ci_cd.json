@@ -31,8 +31,6 @@
         "s3:CreateMultipartUpload"
       ],
       "Resource": [
-        "arn:aws:s3:::idseq-samples-staging",
-        "arn:aws:s3:::idseq-samples-staging/*",
         "arn:aws:s3:::idseq-samples-${DEPLOYMENT_ENVIRONMENT}-${AWS_ACCOUNT_ID}",
         "arn:aws:s3:::idseq-samples-${DEPLOYMENT_ENVIRONMENT}-${AWS_ACCOUNT_ID}/*",
         "arn:aws:s3:::idseq-workflows",

@@ -183,3 +183,4 @@ cython_debug/
 /terraform/sfn_templates/index-generation.json
 /terraform/sfn_templates/short-read-mngs.json
 /terraform/variables.tf
+/.terraform/modules/modules.json

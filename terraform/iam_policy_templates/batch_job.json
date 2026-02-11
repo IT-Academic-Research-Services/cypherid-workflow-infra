@@ -34,16 +34,14 @@
         "arn:aws:s3:::idseq-${DEPLOYMENT_ENVIRONMENT}-*/*",
         "arn:aws:s3:::idseq-samples-test",
         "arn:aws:s3:::idseq-samples-test/*",
-        "arn:aws:s3:::idseq-samples-dev",
-        "arn:aws:s3:::idseq-samples-dev/*",
-        "arn:aws:s3:::idseq-samples-sandbox",
-        "arn:aws:s3:::idseq-samples-sandbox/*",
-        "arn:aws:s3:::idseq-samples-staging",
-        "arn:aws:s3:::idseq-samples-staging/*",
+        "arn:aws:s3:::idseq-samples-dev-*",
+        "arn:aws:s3:::idseq-samples-dev-*/*",
+        "arn:aws:s3:::idseq-samples-sandbox-*",
+        "arn:aws:s3:::idseq-samples-sandbox-*/*",
+        "arn:aws:s3:::idseq-samples-staging-*",
+        "arn:aws:s3:::idseq-samples-staging-*/*",
         "arn:aws:s3:::idseq-samples-${DEPLOYMENT_ENVIRONMENT}-${AWS_ACCOUNT_ID}",
-        "arn:aws:s3:::idseq-samples-${DEPLOYMENT_ENVIRONMENT}-${AWS_ACCOUNT_ID}/*",
-        "arn:aws:s3:::idseq-samples-${DEPLOYMENT_ENVIRONMENT}",
-        "arn:aws:s3:::idseq-samples-${DEPLOYMENT_ENVIRONMENT}/*"
+        "arn:aws:s3:::idseq-samples-${DEPLOYMENT_ENVIRONMENT}-${AWS_ACCOUNT_ID}/*"
       ]
     },
     {

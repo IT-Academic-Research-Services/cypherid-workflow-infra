@@ -20,6 +20,7 @@ resource "aws_iam_role" "idseq_batch_main_job" {
   assume_role_policy = templatefile("${path.module}/iam_policy_templates/trust_policy.json", {
     trust_services = ["ecs-tasks"]
   })
+  tags = local.common_tags
 }
 
 resource "aws_iam_role_policy_attachment" "idseq_batch_main_job" {
