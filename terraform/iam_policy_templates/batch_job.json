@@ -10,6 +10,8 @@
       "Resource": [
         "arn:aws:s3:::aegea-batch-jobs-${AWS_ACCOUNT_ID}",
         "arn:aws:s3:::aegea-batch-jobs-${AWS_ACCOUNT_ID}/*",
+        "arn:aws:s3:::cypherid-samples-deleteme",
+        "arn:aws:s3:::cypherid-samples-deleteme/*",
         "arn:aws:s3:::idseq-workflows",
         "arn:aws:s3:::idseq-workflows/*",
         "arn:aws:s3:::idseq-public-references",

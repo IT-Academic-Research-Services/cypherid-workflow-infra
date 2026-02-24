@@ -53,12 +53,12 @@ module "swipe" {
       path                = "${path.module}/sfn_templates/short-read-mngs.yml",
       extra_template_vars = {},
     },
-    # "index-generation" : {
-    #   path = "${path.module}/sfn_templates/index-generation.yml",
-    #   extra_template_vars = {
-    #     "index_generation_job_queue_arn" : aws_batch_job_queue.index_generation_job_queue.arn,
-    #   },
-    # },
+    "index-generation" : {
+      path = "${path.module}/sfn_templates/index-generation.yml",
+      extra_template_vars = {
+        "index_generation_job_queue_arn" : aws_batch_job_queue.index_generation_job_queue.arn,
+      },
+    },
   }
   stage_memory_defaults = {
     Run : {
@@ -83,13 +83,17 @@ module "swipe" {
     }
   }
 
+  # TODO: Use the correct/renamed buckets, once they get renamed, or built per-environment
+  #       czid-public-references -> idseq-public-references or wherever the public data lives
+  #       cypherid-samples-deleteme -> idseq-workflows or wherever the WDL files live
+  #       idseq-database -> Is this supposed to bethe same as idseq-workflows, or some other component?
   workspace_s3_prefixes = lookup(
     {
       "dev" : ["idseq-database", "czid-public-references", "cypherid-samples-deleteme", "idseq-samples-dev-491013321714"],
       "prod" : ["idseq-prod-samples-us-west-2", "czid-public-references", "idseq-prod-system-test"],
     },
     var.DEPLOYMENT_ENVIRONMENT,
-    ["idseq-samples-${var.DEPLOYMENT_ENVIRONMENT}-${var.AWS_ACCOUNT_ID}", "idseq-database", "czid-public-references"]
+    ["idseq-samples-${var.DEPLOYMENT_ENVIRONMENT}-${var.AWS_ACCOUNT_ID}", "idseq-database", "czid-public-references", "cypherid-samples-deleteme"]
   )
 
   extra_env_vars = {
