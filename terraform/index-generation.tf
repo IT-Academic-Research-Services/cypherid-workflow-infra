@@ -14,7 +14,7 @@ data "aws_vpc" "webservice_vpc" {
 
   tags = {
     service = "cloud-env"
-    env     = var.DEPLOYMENT_ENVIRONMENT == "dev" ? "sandbox" : var.DEPLOYMENT_ENVIRONMENT
+    env     = var.DEPLOYMENT_ENVIRONMENT
   }
 }
 
@@ -28,7 +28,7 @@ data "aws_subnets" "webservice_subnets" {
 
   filter {
     name   = "tag:env"
-    values = [var.DEPLOYMENT_ENVIRONMENT == "dev" ? "sandbox" : var.DEPLOYMENT_ENVIRONMENT]
+    values = [var.DEPLOYMENT_ENVIRONMENT]
   }
 
   filter {
