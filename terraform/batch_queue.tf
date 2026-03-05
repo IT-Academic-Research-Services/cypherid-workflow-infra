@@ -25,6 +25,37 @@ resource "aws_iam_role_policy_attachment" "idseq_batch_service_role" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole"
 }
 
+resource "aws_iam_role_policy_attachment" "idseq_batch_service_role-logs" {
+  role       = aws_iam_role.idseq_batch_service_role.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchLogsReadOnlyAccess"
+}
+
+data "aws_iam_policy_document" "idseq_batch_service_role-destroy" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "ecs:DeleteCluster",
+    ]
+    resources = [
+      "arn:aws:ecs:us-west-2:${var.AWS_ACCOUNT_ID}:cluster/idseq-${var.DEPLOYMENT_ENVIRONMENT}-diamond-*",
+      "arn:aws:ecs:us-west-2:${var.AWS_ACCOUNT_ID}:cluster/idseq-${var.DEPLOYMENT_ENVIRONMENT}-index-generation-*",
+      "arn:aws:ecs:us-west-2:${var.AWS_ACCOUNT_ID}:cluster/idseq-${var.DEPLOYMENT_ENVIRONMENT}-minimap2-*",
+      "arn:aws:ecs:us-west-2:${var.AWS_ACCOUNT_ID}:cluster/idseq-swipe-*",
+    ]
+  }
+}
+
+resource "aws_iam_policy" "idseq_batch_service_role-destroy" {
+  name        = "idseq_batch_service_role-destroy"
+  description = "Policy to allow deleting of ECS clusters that execute WDL pipelines"
+  policy      = data.aws_iam_policy_document.idseq_batch_service_role-destroy.json
+}
+
+resource "aws_iam_role_policy_attachment" "idseq_batch_service_role-destroy" {
+  role       = aws_iam_role.idseq_batch_service_role.name
+  policy_arn = aws_iam_policy.idseq_batch_service_role-destroy.arn
+}
+
 resource "aws_iam_role" "idseq_batch_spot_fleet_service_role" {
   name = "idseq-${var.DEPLOYMENT_ENVIRONMENT}-batch-spot-fleet-service"
   assume_role_policy = templatefile("${path.module}/iam_policy_templates/trust_policy.json", {
