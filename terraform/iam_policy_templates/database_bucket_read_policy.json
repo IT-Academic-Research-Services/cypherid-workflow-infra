@@ -8,8 +8,8 @@
         "s3:GetObject*"
       ],
       "Resource": [
-        "arn:aws:s3:::idseq-public-references",
-        "arn:aws:s3:::idseq-public-references/*",
+        "arn:aws:s3:::seqtoid-public-references",
+        "arn:aws:s3:::seqtoid-public-references/*",
         "arn:aws:s3:::czid-public-references",
         "arn:aws:s3:::czid-public-references/*",
         "arn:aws:s3:::idseq-database",

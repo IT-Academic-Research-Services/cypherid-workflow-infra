@@ -1,5 +1,6 @@
 locals {
-  ecr_repository_names = ["amr", "benchmark", "bulk-download", "consensus-genome", "diamond", "host-genome-generation", "index-generation", "legacy-host-filter", "long-read-mngs", "minimap2", "phylotree-ng", "short-read-mngs"]
+  # TODO: Is "legacy-host-filter" actually unused? If not, add it back in...
+  ecr_repository_names = ["amr", "benchmark", "bulk-download", "consensus-genome", "diamond", "host-genome-generation", "index-generation", "long-read-mngs", "minimap2", "phylotree-ng", "short-read-mngs"]
 }
 
 resource "aws_ecr_repository" "workflow-repositories" {

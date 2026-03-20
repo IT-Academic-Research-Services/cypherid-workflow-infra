@@ -46,7 +46,7 @@ module "swipe" {
     "dev" : 4096,
   }, var.DEPLOYMENT_ENVIRONMENT, 64)
 
-  wdl_workflow_s3_prefix   = "idseq-workflows"
+  wdl_workflow_s3_prefix   = data.aws_s3_bucket.workflows.bucket
   batch_ec2_instance_types = var.DEPLOYMENT_ENVIRONMENT == "test" ? ["optimal"] : ["r5d"]
 
   sfn_template_files = {
@@ -85,16 +85,15 @@ module "swipe" {
   }
 
   # TODO: Use the correct/renamed buckets, once they get renamed, or built per-environment
-  #       czid-public-references -> idseq-public-references or wherever the public data lives
-  #       cypherid-samples-deleteme -> idseq-workflows or wherever the WDL files live
-  #       idseq-database -> Is this supposed to bethe same as idseq-workflows, or some other component?
+  #       czid-public-references -> seqtoid-public-references or wherever the public data lives
+  #       idseq-workflows -> cypherid-samples-deleteme -> seqtoid-workflows or wherever the WDL files live
+  #       idseq-database -> Is this supposed to be the same as idseq-workflows or seqtoid-public-references, or some other component?
   workspace_s3_prefixes = lookup(
     {
-      "dev" : ["idseq-database", "czid-public-references", "cypherid-samples-deleteme", "idseq-samples-dev-491013321714"],
-      "prod" : ["idseq-prod-samples-us-west-2", "czid-public-references", "idseq-prod-system-test"],
+      "prod" : ["idseq-prod-samples-us-west-2", "czid-public-references", local.s3_bucket_public_references, local.s3_bucket_workflows, "idseq-prod-system-test"],
     },
     var.DEPLOYMENT_ENVIRONMENT,
-    ["idseq-samples-${var.DEPLOYMENT_ENVIRONMENT}-${var.AWS_ACCOUNT_ID}", "idseq-database", "czid-public-references", "cypherid-samples-deleteme"]
+    ["idseq-samples-${var.DEPLOYMENT_ENVIRONMENT}-${var.AWS_ACCOUNT_ID}", "czid-public-references", local.s3_bucket_public_references, local.s3_bucket_workflows]
   )
 
   extra_env_vars = {

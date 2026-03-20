@@ -8,8 +8,8 @@
         "s3:Get*"
       ],
       "Resource": [
-        "arn:aws:s3:::idseq-public-references",
-        "arn:aws:s3:::idseq-public-references/*",
+        "arn:aws:s3:::seqtoid-public-references",
+        "arn:aws:s3:::seqtoid-public-references/*",
         "arn:aws:s3:::czid-public-references",
         "arn:aws:s3:::czid-public-references/*",
         "arn:aws:s3:::idseq-database",
@@ -33,10 +33,14 @@
       "Resource": [
         "arn:aws:s3:::idseq-samples-${DEPLOYMENT_ENVIRONMENT}-${AWS_ACCOUNT_ID}",
         "arn:aws:s3:::idseq-samples-${DEPLOYMENT_ENVIRONMENT}-${AWS_ACCOUNT_ID}/*",
+        "arn:aws:s3:::${S3_WORKFLOWS_BUCKET}",
+        "arn:aws:s3:::${S3_WORKFLOWS_BUCKET}/*",
         "arn:aws:s3:::idseq-workflows",
         "arn:aws:s3:::idseq-workflows/*",
         "arn:aws:s3:::tfstate-${AWS_ACCOUNT_ID}",
         "arn:aws:s3:::tfstate-${AWS_ACCOUNT_ID}/*",
+        "arn:aws:s3:::tfstate-${AWS_ACCOUNT_ID}-test",
+        "arn:aws:s3:::tfstate-${AWS_ACCOUNT_ID}-test/*",
         "arn:aws:s3:::idseq-staging-heatmap",
         "arn:aws:s3:::idseq-staging-heatmap/*",
         "arn:aws:s3:::idseq-${DEPLOYMENT_ENVIRONMENT}-heatmap",

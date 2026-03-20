@@ -176,8 +176,9 @@ cython_debug/
 
 .python-version
 .terraform.dev
-.terraform.staging
 .terraform.prod
+.terraform.sandbox
+.terraform.staging
 .terraform.test
 .terraform.lock.hcl
 /terraform/sfn_templates/index-generation.json

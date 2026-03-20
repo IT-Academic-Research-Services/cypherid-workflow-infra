@@ -136,7 +136,7 @@ def print_log_line(event):
 
 
 @lru_cache()
-def find_host_filter_index(host_genome, index_type, database_bucket_name="czid-public-references"):
+def find_host_filter_index(host_genome, index_type, database_bucket_name="seqtoid-public-references"):
     assert index_type in {"bowtie2_genome.tar", "STAR_genome.tar"}
     index_obj = None
     for obj in s3.Bucket(database_bucket_name).objects.filter(Prefix=f"host_filter/{host_genome}"):
@@ -169,7 +169,7 @@ parser.add_argument("--host-genome", default="human")
 parser.add_argument("--max-input-fragments", default=9000)
 parser.add_argument("--max-subsample-fragments", default=9000)
 parser.add_argument("--adapter-fasta",
-                    default="s3://czid-public-references/adapter_sequences/illumina_TruSeq3-PE-2_NexteraPE-PE.fasta")
+                    default="s3://seqtoid-public-references/adapter_sequences/illumina_TruSeq3-PE-2_NexteraPE-PE.fasta")
 # TODO: make this smarter somehow
 parser.add_argument("--index-version", default="2021-01-22")
 parser.add_argument("--no-deuterostome-filter", action="store_false", dest="use_deuterostome_filter")
@@ -203,12 +203,12 @@ if args.sfn_name is None:
 
 if args.workflow_name == "short-read-mngs":
     index_manifest_key = path.join(path.dirname(boto3.client("s3").list_objects_v2(
-        Bucket="czid-public-references",
+        Bucket="seqtoid-public-references",
         MaxKeys=1,
         Prefix=f"ncbi-indexes-prod/{args.index_version}/",
     )["Contents"][0]["Key"]), "run_output.json")
     index_manifest = json.loads(
-        s3.Object("czid-public-references", index_manifest_key).get()["Body"].read().decode().strip()
+        s3.Object("seqtoid-public-references", index_manifest_key).get()["Body"].read().decode().strip()
     )
 
 if args.stages is None:

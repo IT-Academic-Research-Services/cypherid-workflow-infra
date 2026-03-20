@@ -187,7 +187,7 @@ resource "aws_iam_role_policy" "start_index_generation_lambda" {
         Action : [
           "s3:ListBucket",
         ],
-        Resource : "arn:aws:s3:::${var.DEPLOYMENT_ENVIRONMENT == "prod" ? "czid-public-references" : "idseq-database"}",
+        Resource : "arn:aws:s3:::seqtoid-public-references", # TODO: aws_s3_bucket.cypherid-public-references[0].arn
       },
       {
         Effect : "Allow",
@@ -221,7 +221,8 @@ resource "aws_lambda_function" "start_index_generation" {
       AWS_ACCOUNT_ID                    = var.AWS_ACCOUNT_ID
       MEMORY                            = "480000"
       VCPU                              = "60"
-      BUCKET                            = var.DEPLOYMENT_ENVIRONMENT == "prod" ? "czid-public-references" : "idseq-database"
+      BUCKET                            = data.aws_s3_bucket.public-references.bucket
+      S3_WORKFLOWS_BUCKET               = data.aws_s3_bucket.workflows.bucket
     }
   }
 }

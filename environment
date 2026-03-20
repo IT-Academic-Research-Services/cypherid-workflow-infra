@@ -46,7 +46,7 @@ else
     TF_VAR_owner="${OWNER}"
     TF_VAR_environment="${DEPLOYMENT_ENVIRONMENT}"
 
-    if [[ $DEPLOYMENT_ENVIRONMENT == dev ]]; then
+    if [[ $DEPLOYMENT_ENVIRONMENT == dev || $DEPLOYMENT_ENVIRONMENT == sandbox ]]; then
         TF_S3_BUCKET=tfstate-$AWS_ACCOUNT_ID-test
     else
         TF_S3_BUCKET=tfstate-$AWS_ACCOUNT_ID

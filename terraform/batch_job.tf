@@ -12,6 +12,7 @@ resource "aws_iam_policy" "idseq_batch_main_job" {
     AWS_ACCOUNT_ID         = var.AWS_ACCOUNT_ID,
     DEPLOYMENT_ENVIRONMENT = var.DEPLOYMENT_ENVIRONMENT,
     PARAMETER_KMS_KEY_ARN  = length(data.aws_kms_alias.parameter_store) > 0 ? data.aws_kms_alias.parameter_store[0].target_key_arn : "",
+    S3_WORKFLOWS_BUCKET    = data.aws_s3_bucket.workflows.bucket
   })
 }
 
