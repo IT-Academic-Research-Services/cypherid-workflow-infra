@@ -1,6 +1,8 @@
 module "swipe" {
   source = "github.com/chanzuckerberg/swipe?ref=v1.4.9"
-  tags = local.common_tags
+  tags = merge(local.common_tags, {
+    Name = "swipe"
+  })
 
   app_name        = "idseq-swipe-${var.DEPLOYMENT_ENVIRONMENT}"
   job_policy_arns = [aws_iam_policy.idseq_batch_main_job.arn, "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"]
@@ -46,7 +48,7 @@ module "swipe" {
     "dev" : 4096,
   }, var.DEPLOYMENT_ENVIRONMENT, 64)
 
-  wdl_workflow_s3_prefix   = data.aws_s3_bucket.workflows.bucket
+  wdl_workflow_s3_prefix   = aws_s3_bucket.workflows.bucket
   batch_ec2_instance_types = var.DEPLOYMENT_ENVIRONMENT == "test" ? ["optimal"] : ["r5d"]
 
   sfn_template_files = {

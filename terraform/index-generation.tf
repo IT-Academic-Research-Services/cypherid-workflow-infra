@@ -56,7 +56,6 @@ resource "aws_launch_template" "index_generation_launch_template" {
   # will cause the whole launch template to be replaced, forcing the compute environment to pick up the changes.
   name      = "${local.service_name}-batch-${local.launch_template_user_data_hash}"
   user_data = filebase64(local.launch_template_user_data_file)
-  tags      = local.common_tags
 
   # NOTE[JH]: This setting makes IMDSv2 required. Any software that needs to talk to the metadata service
   # needs to do so using the v2 endpoint.
@@ -129,6 +128,10 @@ resource "aws_batch_compute_environment" "index_generation_compute_environment" 
       compute_resources[0].desired_vcpus,
     ]
   }
+
+  tags = {
+    Name = "${local.service_name}-batch"
+  }
 }
 
 resource "aws_batch_job_queue" "index_generation_job_queue" {
@@ -163,8 +166,6 @@ resource "aws_iam_role" "start_index_generation_lambda" {
       },
     ],
   })
-
-  tags = local.common_tags
 }
 
 resource "aws_iam_role_policy" "start_index_generation_lambda" {
@@ -211,7 +212,6 @@ resource "aws_lambda_function" "start_index_generation" {
   filename         = data.archive_file.lambda_archive.output_path
 
   role = aws_iam_role.start_index_generation_lambda.arn
-  tags = local.common_tags
 
   environment {
     variables = {
@@ -222,7 +222,7 @@ resource "aws_lambda_function" "start_index_generation" {
       MEMORY                            = "480000"
       VCPU                              = "60"
       BUCKET                            = data.aws_s3_bucket.public-references.bucket
-      S3_WORKFLOWS_BUCKET               = data.aws_s3_bucket.workflows.bucket
+      S3_WORKFLOWS_BUCKET               = aws_s3_bucket.workflows.bucket
     }
   }
 }

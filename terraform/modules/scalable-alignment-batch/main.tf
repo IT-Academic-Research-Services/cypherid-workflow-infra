@@ -39,7 +39,9 @@ resource "aws_launch_template" "alignment_launch_template_ec2" {
   name = "${local.service_name}-batch-${md5(local.user_data_ec2)}"
 
   user_data = local.user_data_ec2
-  tags      = local.common_tags
+  tags = {
+    service = local.service_name
+  }
 
   # NOTE[JH]: This setting makes IMDSv2 required. Any software that needs to talk to the metadata service
   # needs to do so using the v2 endpoint.
@@ -73,7 +75,9 @@ resource "aws_launch_template" "alignment_launch_template_spot" {
   name = "${local.service_name}-batch-${md5(local.user_data_spot)}"
 
   user_data = local.user_data_spot
-  tags      = local.common_tags
+  tags = {
+    service = local.service_name
+  }
 
   # NOTE[JH]: This setting makes IMDSv2 required. Any software that needs to talk to the metadata service
   # needs to do so using the v2 endpoint.
@@ -144,6 +148,10 @@ resource "aws_batch_compute_environment" "alignment_compute_environment" {
     ignore_changes = [
       compute_resources[0].desired_vcpus,
     ]
+  }
+
+  tags = {
+    service = local.service_name
   }
 }
 

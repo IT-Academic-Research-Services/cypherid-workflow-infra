@@ -1,6 +1,7 @@
 locals {
   # TODO: Where else to put these, possibly env-specific, configurations?
-  s3_bucket_workflows         = "cypherid-samples-deleteme"
+  # s3_bucket_workflows         = "cypherid-samples-deleteme"
+  s3_bucket_workflows         = "seqtoid-workflows-${var.DEPLOYMENT_ENVIRONMENT}-${var.AWS_ACCOUNT_ID}"
   s3_bucket_public_references = "seqtoid-public-references"
 }
 
@@ -10,9 +11,66 @@ data "aws_s3_bucket" "public-references" {
   bucket = local.s3_bucket_public_references
 }
 
-# Added this here, because it is a bucket, and we need to keep track of it somewhere!
-data "aws_s3_bucket" "workflows" {
-  bucket = local.s3_bucket_workflows
+resource "aws_s3_bucket" "workflows" {
+  bucket        = local.s3_bucket_workflows
+  force_destroy = true
+}
+
+resource "aws_s3_bucket_versioning" "workflows" {
+  bucket = aws_s3_bucket.workflows.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "workflows" {
+  depends_on = [aws_s3_bucket_versioning.workflows]
+  bucket     = aws_s3_bucket.workflows.id
+
+  rule {
+    id = "default"
+    noncurrent_version_transition {
+      noncurrent_days = 30
+      storage_class   = "DEEP_ARCHIVE"
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 60
+    }
+
+    status = "Enabled"
+  }
+}
+
+# resource "aws_s3_bucket_acl" "workflows" {
+#   bucket = aws_s3_bucket.workflows.id
+#   acl    = "private"
+# }
+
+data "aws_iam_policy_document" "workflows-bucket" {
+  statement {
+    sid = "ReadAccess"
+    actions = [
+      "s3:ListBucket*",
+      "s3:GetObject*"
+    ]
+    resources = [
+      aws_s3_bucket.workflows.arn,
+      "${aws_s3_bucket.workflows.arn}/*"
+    ]
+    principals {
+      type        = "AWS"
+      identifiers = formatlist("arn:aws:iam::%s:root", var.AWS_ACCOUNT_ID)
+      # type        = "*"
+      # identifiers = ["*"]
+    }
+    effect = "Allow"
+  }
+}
+
+resource "aws_s3_bucket_policy" "workflows" {
+  bucket = aws_s3_bucket.workflows.id
+  policy = data.aws_iam_policy_document.workflows-bucket.json
 }
 
 # resource "aws_s3_bucket" "cypherid-public-references" {

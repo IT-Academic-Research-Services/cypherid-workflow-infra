@@ -20,13 +20,16 @@ terraform {
 provider "aws" {
   region = "us-west-2"
   default_tags {
-      tags = {
-        environment = var.environment
-        owner = var.owner
-        application = var.app_name
-        managedBy = "terraform"
-      }
+    tags = {
+      environment = var.environment
+      env         = var.environment
+      owner       = var.owner
+      project     = var.app_name
+      application = var.app_name
+      managedBy   = "terraform"
+      service     = "main"
     }
+  }
 }
 
 module "idseq" {

@@ -148,7 +148,7 @@ def get_workflow_name(sfn_state):
             # TODO: This is extremely hackish; trying to determine the name of the workflow based on what buck it is in!
             #  Since the old bucket is hardcoded, without an easy way of passing in the actual Prod bucket name,
             #  so we again hardcode it!
-            if s3_object(v).bucket_name == "idseq-workflows" or s3_object(v).bucket_name == "cypherid-samples-deleteme":
+            if s3_object(v).bucket_name == "cypherid-samples-deleteme" or s3_object(v).bucket_name.starts_with("seqtoid-workflows-"):
                 return os.path.dirname(s3_object(v).key)
             else:
                 return os.path.splitext(os.path.basename(s3_object(v).key))[0]
