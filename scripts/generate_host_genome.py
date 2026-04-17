@@ -15,7 +15,7 @@ import requests
 from simple_run_sfn import simple_run_sfn
 
 
-REFERENCES_BUCKET = 'czid-public-references'
+REFERENCES_BUCKET = 'seqtoid-public-references'
 
 
 sts = boto3.client('sts')

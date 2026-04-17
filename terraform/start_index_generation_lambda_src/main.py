@@ -15,6 +15,7 @@ def start_index_generation(event, *args):
     memory = int(os.environ["MEMORY"])
     vcpu = int(os.environ["VCPU"])
     bucket = os.environ["BUCKET"]
+    workflows_bucket = os.environ["S3_WORKFLOWS_BUCKET"]
 
     major_version = re.search(r"v(\d+)\..+", version).group(1)
 
@@ -38,15 +39,13 @@ def start_index_generation(event, *args):
     index_name = event["time"][:10]
     s3_dir = f"s3://{bucket}/ncbi-indexes-{deployment_environment}/{index_name}/index-generation-{major_version}"
     input_dict = {
-        "RUN_WDL_URI": f"s3://idseq-workflows/index-generation-{version}/index_generation.wdl",
+        "RUN_WDL_URI": f"s3://{workflows_bucket}/index-generation-{version}/index_generation.wdl",
         "Input": {
             "Run": {
                 "docker_image_id": f"{aws_account_id}.dkr.ecr.{aws_region}.amazonaws.com/index-generation:{version}",
                 "write_to_db": True,
                 "index_name": index_name,
-                "env": "sandbox"
-                if deployment_environment == "dev"
-                else deployment_environment,
+                "env": deployment_environment,
                 "s3_dir": s3_dir,
                 "previous_lineages": f"s3://{bucket}/{previous_lineages}",
             },

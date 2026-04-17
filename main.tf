@@ -1,12 +1,12 @@
 variable "environment" { type = string }
-variable "app_name" { 
-    type = string
-    default = "idseq"
+variable "app_name" {
+  type    = string
+  default = "idseq"
 }
 variable "owner" { type = string }
 
 terraform {
-  required_version = ">= 1.11.3"
+  required_version = ">= 1.14.3"
   required_providers {
     aws = {
       version = "~> 4.54"
@@ -18,14 +18,22 @@ terraform {
 }
 
 provider "aws" {
+  region = "us-west-2"
   default_tags {
-      tags = {
-        environment = var.environment
-        owner = var.owner
-        application = var.app_name
-        managedBy = "terraform"
-      }
+    tags = {
+      environment = var.environment
+      env         = var.environment
+      owner       = var.owner
+      project     = var.app_name
+      application = var.app_name
+      managedBy   = "terraform"
+      service     = "main"
     }
+  }
+  ignore_tags {
+    key_prefixes = ["QSConfigId-", "QSConfigName-"]
+    keys         = ["environment", "env", "owner", "project", "application", "managedBy"]
+  }
 }
 
 module "idseq" {

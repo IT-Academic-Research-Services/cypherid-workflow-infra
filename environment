@@ -22,7 +22,7 @@ else
         TFSTATE_FILE="terraform.tfstate"
         AWS_ACCOUNT_ALIAS=idseq-local
     else
-        #AWS_DEFAULT_REGION=$(aws configure get region)
+        AWS_DEFAULT_REGION=$(aws configure get region)
         AWS_ACCOUNT_ID=$(aws sts get-caller-identity | jq -r .Account)
         TFSTATE_FILE="${TF_DATA_DIR}/remote.tfstate"
 
@@ -44,7 +44,13 @@ else
 
     OWNER=matt.jobin@ucsf.edu
     TF_VAR_owner="${OWNER}"
-    TF_S3_BUCKET=tfstate-$AWS_ACCOUNT_ID-test
+    TF_VAR_environment="${DEPLOYMENT_ENVIRONMENT}"
+
+    if [[ $DEPLOYMENT_ENVIRONMENT == dev || $DEPLOYMENT_ENVIRONMENT == sandbox ]]; then
+        TF_S3_BUCKET=tfstate-$AWS_ACCOUNT_ID-test
+    else
+        TF_S3_BUCKET=tfstate-$AWS_ACCOUNT_ID
+    fi
 
     if [[ $DEPLOYMENT_ENVIRONMENT == test ]] && [[ -n $GITHUB_ACTIONS ]]; then
         DOCKER_REGISTRY="docker.pkg.github.com/${GITHUB_REPOSITORY}"

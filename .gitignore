@@ -165,10 +165,23 @@ cython_debug/
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
+.idea/
+*.iml
 
 # Ruff stuff:
 .ruff_cache/
 
 # PyPI configuration file
 .pypirc
+
+.python-version
+.terraform.dev
+.terraform.prod
+.terraform.sandbox
+.terraform.staging
+.terraform.test
+.terraform.lock.hcl
+/terraform/sfn_templates/index-generation.json
+/terraform/sfn_templates/short-read-mngs.json
+/terraform/variables.tf
+/.terraform/modules/modules.json
