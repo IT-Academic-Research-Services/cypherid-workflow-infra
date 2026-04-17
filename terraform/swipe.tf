@@ -1,5 +1,8 @@
 module "swipe" {
-  source = "github.com/chanzuckerberg/swipe?ref=v1.4.6"
+  source = "github.com/chanzuckerberg/swipe?ref=v1.4.9"
+  tags = {
+    Name = "swipe"
+  }
 
   app_name        = "idseq-swipe-${var.DEPLOYMENT_ENVIRONMENT}"
   job_policy_arns = [aws_iam_policy.idseq_batch_main_job.arn, "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"]
@@ -45,7 +48,7 @@ module "swipe" {
     "dev" : 4096,
   }, var.DEPLOYMENT_ENVIRONMENT, 64)
 
-  wdl_workflow_s3_prefix   = "idseq-workflows"
+  wdl_workflow_s3_prefix   = aws_s3_bucket.workflows.bucket
   batch_ec2_instance_types = var.DEPLOYMENT_ENVIRONMENT == "test" ? ["optimal"] : ["r5d"]
 
   sfn_template_files = {
@@ -83,10 +86,17 @@ module "swipe" {
     }
   }
 
-  workspace_s3_prefixes = lookup({
-    "dev" : ["idseq-samples-development", "idseq-database", "idseq-samples-sandbox"],
-    "prod" : ["idseq-prod-samples-us-west-2", "czid-public-references", "idseq-prod-system-test"],
-  }, var.DEPLOYMENT_ENVIRONMENT, ["idseq-samples-${var.DEPLOYMENT_ENVIRONMENT}", "idseq-database"])
+  # TODO: Use the correct/renamed buckets, once they get renamed, or built per-environment
+  #       czid-public-references -> seqtoid-public-references or wherever the public data lives
+  #       idseq-workflows -> cypherid-samples-deleteme -> seqtoid-workflows or wherever the WDL files live
+  #       idseq-database -> Is this supposed to be the same as idseq-workflows or seqtoid-public-references, or some other component?
+  workspace_s3_prefixes = lookup(
+    {
+      "prod" : ["idseq-prod-samples-us-west-2", "czid-public-references", local.s3_bucket_public_references, local.s3_bucket_workflows, "idseq-prod-system-test"],
+    },
+    var.DEPLOYMENT_ENVIRONMENT,
+    ["idseq-samples-${var.DEPLOYMENT_ENVIRONMENT}-${var.AWS_ACCOUNT_ID}", "czid-public-references", local.s3_bucket_public_references, local.s3_bucket_workflows]
+  )
 
   extra_env_vars = {
     DEPLOYMENT_ENVIRONMENT = var.DEPLOYMENT_ENVIRONMENT,
@@ -117,4 +127,46 @@ resource "aws_ssm_parameter" "sfn_notifications_queue_arn" {
   name  = "/idseq-${var.DEPLOYMENT_ENVIRONMENT}-web/SFN_NOTIFICATIONS_QUEUE_ARN"
   type  = "String"
   value = module.swipe.sfn_notification_queue_arns["web"]
+}
+
+data "aws_iam_policy_document" "ecs-assume-role" {
+  statement {
+    principals {
+      type        = "Service"
+      identifiers = ["ecs-tasks.amazonaws.com"]
+    }
+
+    actions = ["sts:AssumeRole"]
+  }
+}
+
+resource "aws_iam_role" "aegea-ecs" {
+  name               = "aegea.ecs"
+  description        = "undocumented but required IAM Role needed by Workflows from the ${var.DEPLOYMENT_ENVIRONMENT} ECS Workflow Service(s)"
+  assume_role_policy = data.aws_iam_policy_document.ecs-assume-role.json
+}
+
+resource "aws_iam_role_policy_attachment" "aegea-ecs-ec2-role-policy-attach" {
+  role       = aws_iam_role.aegea-ecs.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
+}
+
+resource "aws_iam_role_policy_attachment" "aegea-ecs-batch-role-policy-attach" {
+  role       = aws_iam_role.aegea-ecs.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole"
+}
+
+resource "aws_security_group" "aegea-ecs-sg" {
+  name        = "aegea.ecs"
+  description = "undocumented but required Security Group needed by Workflows from the ${var.DEPLOYMENT_ENVIRONMENT} ECS Workflow Service(s)"
+  vpc_id      = aws_vpc.idseq.id
+  tags = {
+    Name = "aegea.ecs"
+  }
+}
+
+resource "aws_vpc_security_group_egress_rule" "aegea-ecs-allow_all_traffic_ipv4" {
+  security_group_id = aws_security_group.aegea-ecs-sg.id
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "-1" # semantically equivalent to all ports
 }

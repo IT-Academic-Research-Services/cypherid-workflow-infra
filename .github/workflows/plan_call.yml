@@ -1,0 +1,103 @@
+name: Plan Component Call
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Both Github Environment and AWS Environment"
+        type: string
+        required: true
+    outputs:
+      change-count:
+        description: "Then number of changes in the generated Plan"
+        value: ${{ jobs.plan.outputs.change-count }}
+      plan-artifact-id:
+        description: "Then number of changes in the generated Plan"
+        value: ${{ jobs.plan.outputs.count }}
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  TERRAFORM_VERSION: 1.14.8 # TODO: Make this more dynamic
+
+jobs:
+  plan:
+    name: Plan
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-west-2
+    outputs:
+      change-count: ${{ steps.plan.outputs.change-count }}
+      plan-artifact-id: ${{ steps.upload-plan.outputs.artifact-id }}
+    steps:
+      - name: Git clone the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Reconfigure Git to use HTTP authentication
+        run: |
+          git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        if: ${{ !env.ACT }}
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-executor
+          #role-session-name: GitHub_to_AWS_via_FederatedOIDC
+          aws-region: ${{ env.AWS_REGION }}
+          aws-profile: idseq-${{ inputs.environment }}
+      - name: Configure AWS Credentials for local execution using nektos act
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        if: ${{ env.ACT }}
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          output-env-credentials: true
+          #role-session-name: GitHub_to_AWS_via_FederatedOIDC
+          aws-region: ${{ env.AWS_REGION }}
+          aws-profile: idseq-${{ inputs.environment }}
+      - name: Setup Terraform
+        run: |
+          curl -OLs https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip
+          sudo unzip -o terraform_${TERRAFORM_VERSION}_linux_amd64.zip -d /usr/local/bin
+      - name: Install AWS CLI
+        uses: unfor19/install-aws-cli-action@v1
+        with:
+          version: 2
+          verbose: false
+          arch: amd64
+      - name: Terraform Plan
+        id: plan
+        run: |
+          set -x
+          source "environment.${{ inputs.environment }}"
+          make package-lambdas
+          make templates init-tf
+          terraform refresh
+          set +e
+          terraform plan -input=false -detailed-exitcode -refresh=false -out="${{ github.workspace }}/tf.plan"
+          exitcode=$?
+          echo "Terraform exited with exit-code $exitcode"
+          if [[ $exitcode -eq 1 ]]; then
+            exit $exitcode
+          fi
+          terraform show -json "${{ github.workspace }}/tf.plan" > plan.json
+          change_count=$(jq -r '.resource_changes[].change.actions[]' plan.json | grep -v "no-op" | wc -l)
+          echo "change-count=$change_count" >> "$GITHUB_OUTPUT"
+      # TODO: Only uncomment for local execution via nektos act, when testing outputs and artifacts
+      #- name: Terraform Plan
+      #  id: plan
+      #  run: |
+      #    echo "foo" > "${{ github.workspace }}/tf.plan"
+      #    change_count=$(( RANDOM % 3 ))
+      #    echo "change-count=$change_count"
+      #    echo "change-count=$change_count" >> "$GITHUB_OUTPUT"
+      - name: Upload Plan as Artifact
+        id: upload-plan
+        uses: actions/upload-artifact@v5
+        with:
+          name: "plan"
+          path: "${{ github.workspace }}/tf.plan"
+          retention-days: 1
+          compression-level: 0 # Plan files are already pretty compact, and max compression gives at best 10% savings
+          if-no-files-found: error
