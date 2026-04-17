@@ -3,6 +3,7 @@ data "aws_kms_alias" "parameter_store" {
 
   name = "alias/parameter_store_key"
 }
+// TODO: Create KMS key here
 
 resource "aws_iam_policy" "idseq_batch_main_job" {
   name = "idseq-${var.DEPLOYMENT_ENVIRONMENT}-batch-job"
@@ -11,6 +12,7 @@ resource "aws_iam_policy" "idseq_batch_main_job" {
     AWS_ACCOUNT_ID         = var.AWS_ACCOUNT_ID,
     DEPLOYMENT_ENVIRONMENT = var.DEPLOYMENT_ENVIRONMENT,
     PARAMETER_KMS_KEY_ARN  = length(data.aws_kms_alias.parameter_store) > 0 ? data.aws_kms_alias.parameter_store[0].target_key_arn : "",
+    S3_WORKFLOWS_BUCKET    = aws_s3_bucket.workflows.bucket
   })
 }
 
@@ -19,7 +21,6 @@ resource "aws_iam_role" "idseq_batch_main_job" {
   assume_role_policy = templatefile("${path.module}/iam_policy_templates/trust_policy.json", {
     trust_services = ["ecs-tasks"]
   })
-  tags = local.common_tags
 }
 
 resource "aws_iam_role_policy_attachment" "idseq_batch_main_job" {

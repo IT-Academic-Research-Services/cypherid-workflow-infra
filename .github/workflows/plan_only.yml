@@ -1,0 +1,89 @@
+name: Terraform Plan
+run-name: Terraform Plan in ${{ github.base_ref || github.ref_name }} by ${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Both Github Environment and AWS Environment"
+        required: true
+        type: environment
+        default: dev
+
+env:
+  branch_name: ${{ github.base_ref || github.ref_name }}
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.base_ref || github.ref_name }}-${{ inputs.environment }}
+  cancel-in-progress: true
+
+jobs:
+  should-plan:
+    name: Check if Terraform Plan should be performed
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.calculate-environment.outputs.environment }}
+    steps:
+      - name: Calculate Environment
+        id: calculate-environment
+        # TODO: Handle Releases
+        run: |
+          echo "branch_name=${{ env.branch_name }}"
+          echo "environment=${{ inputs.environment }}"
+          echo "| Planning | Environment | Branch |" >> $GITHUB_STEP_SUMMARY
+          echo "| ---------------- | ----------- | ------ |" >> $GITHUB_STEP_SUMMARY
+          if [[ -n "${{ inputs.environment }}" ]]; then
+            echo "environment=${{ inputs.environment }}" >> "$GITHUB_OUTPUT"
+            echo "| :green_circle: Enabled | ${{ inputs.environment }} | ${{ env.branch_name }} |" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ env.branch_name }}" == "development" ]]; then
+            echo "environment=dev" >> "$GITHUB_OUTPUT"
+            echo "| :green_circle: Enabled | dev | ${{ env.branch_name }} |" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ env.branch_name }}" == "staging" ]]; then
+            echo "environment=staging" >> "$GITHUB_OUTPUT"
+            echo "| :green_circle: Enabled | staging | ${{ env.branch_name }} |" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ env.branch_name }}" == "main" ]]; then
+            echo "environment=prod" >> "$GITHUB_OUTPUT"
+            echo "| :green_circle: Enabled | prod | ${{ env.branch_name }} |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "environment=" >> "$GITHUB_OUTPUT"
+            echo "| :yellow_circle: Disabled | | ${{ env.branch_name }} |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  plan:
+    name: Execute Terraform Plan
+    if: ${{ !cancelled() && needs.should-plan.outputs.environment }}
+    needs:
+      - should-plan
+    uses: ./.github/workflows/plan_call.yml
+    with:
+      environment: "${{ needs.should-plan.outputs.environment }}"
+    secrets: inherit
+
+  plan-summary:
+    name: Terraform Plan Summary
+    if: ${{ !cancelled() }} # && contains(needs.plan.result, 'success') }}
+    runs-on: ubuntu-latest
+    needs:
+      - plan
+    steps:
+      - name: Generate Summary
+        run: |
+          plan_result=${{ needs.plan.result }}
+          echo "plan.result=$plan_result"
+          change_count=${{ needs.plan.outputs.change-count }}
+          echo "change_count=$change_count"
+          echo "|   | Status | Changes |" >> $GITHUB_STEP_SUMMARY
+          echo "| - | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
+          if [[ "$plan_result" != "success" ]]; then
+            echo "| :red_circle: | Error | $plan_result |" >> $GITHUB_STEP_SUMMARY
+          elif [[ "$change_count" == "0" ]]; then
+            echo "| :green_circle: | Success | No Changes |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| :yellow_circle: | Success | $change_count |" >> $GITHUB_STEP_SUMMARY
+          fi

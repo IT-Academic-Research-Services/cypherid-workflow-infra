@@ -5,16 +5,16 @@ data "aws_availability_zones" "available" {
 resource "aws_vpc" "idseq" {
   cidr_block           = "10.20.0.0/16"
   enable_dns_hostnames = true
-  tags = merge(local.common_tags, {
+  tags = {
     Name = "idseq-${var.DEPLOYMENT_ENVIRONMENT}"
-  })
+  }
 }
 
 resource "aws_internet_gateway" "idseq" {
   vpc_id = aws_vpc.idseq.id
-  tags = merge(local.common_tags, {
+  tags = {
     Name = "idseq-${var.DEPLOYMENT_ENVIRONMENT}"
-  })
+  }
 }
 
 resource "aws_route" "idseq" {
@@ -29,9 +29,9 @@ resource "aws_subnet" "idseq" {
   availability_zone       = each.key
   cidr_block              = cidrsubnet(aws_vpc.idseq.cidr_block, 8, index(data.aws_availability_zones.available.names, each.key))
   map_public_ip_on_launch = true
-  tags = merge(local.common_tags, {
+  tags = {
     Name = "idseq-${var.DEPLOYMENT_ENVIRONMENT}"
-  })
+  }
 }
 
 resource "aws_security_group" "idseq" {

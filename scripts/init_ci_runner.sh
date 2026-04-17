@@ -4,7 +4,7 @@ set -a
 AWS_DEFAULT_REGION=us-west-2
 AWS_DEFAULT_OUTPUT=json
 DEBIAN_FRONTEND=noninteractive
-TERRAFORM_VERSION=1.3.0
+TERRAFORM_VERSION=1.14.3
 GH_CLI_VERSION=1.7.0
 LC_ALL=C.UTF-8
 LANG=C.UTF-8
@@ -26,4 +26,8 @@ pip install -r requirements-dev.txt
 
 set -x
 
-source environment
+if [[ -n "$DEPLOYMENT_ENVIRONMENT" ]]; then
+    source environment.$DEPLOYMENT_ENVIRONMENT
+else
+    source environment
+fi

@@ -14,7 +14,7 @@ data "aws_vpc" "webservice_vpc" {
 
   tags = {
     service = "cloud-env"
-    env     = var.DEPLOYMENT_ENVIRONMENT == "dev" ? "sandbox" : var.DEPLOYMENT_ENVIRONMENT
+    env     = var.DEPLOYMENT_ENVIRONMENT
   }
 }
 
@@ -28,7 +28,7 @@ data "aws_subnets" "webservice_subnets" {
 
   filter {
     name   = "tag:env"
-    values = [var.DEPLOYMENT_ENVIRONMENT == "dev" ? "sandbox" : var.DEPLOYMENT_ENVIRONMENT]
+    values = [var.DEPLOYMENT_ENVIRONMENT]
   }
 
   filter {
@@ -56,7 +56,6 @@ resource "aws_launch_template" "index_generation_launch_template" {
   # will cause the whole launch template to be replaced, forcing the compute environment to pick up the changes.
   name      = "${local.service_name}-batch-${local.launch_template_user_data_hash}"
   user_data = filebase64(local.launch_template_user_data_file)
-  tags      = local.common_tags
 
   # NOTE[JH]: This setting makes IMDSv2 required. Any software that needs to talk to the metadata service
   # needs to do so using the v2 endpoint.
@@ -96,12 +95,13 @@ resource "aws_batch_compute_environment" "index_generation_compute_environment" 
       */
     instance_type = var.DEPLOYMENT_ENVIRONMENT == "test" ? ["optimal"] : ["r5n.24xlarge"]
 
-    tags = merge(local.common_tags, {
+    tags = {
       Name = "${local.service_name}-batch"
-    })
+    }
 
     image_id           = data.aws_ssm_parameter.idseq_batch_ami.value
-    ec2_key_pair       = "idseq-${var.DEPLOYMENT_ENVIRONMENT}"
+    #TODO: Is this needed?
+    # ec2_key_pair       = "idseq-${var.DEPLOYMENT_ENVIRONMENT}"
     min_vcpus          = 0
     desired_vcpus      = 0
     max_vcpus          = 96 // 1 r5n.24xlarge
@@ -127,6 +127,10 @@ resource "aws_batch_compute_environment" "index_generation_compute_environment" 
     ignore_changes = [
       compute_resources[0].desired_vcpus,
     ]
+  }
+
+  tags = {
+    Name = "${local.service_name}-batch"
   }
 }
 
@@ -162,8 +166,6 @@ resource "aws_iam_role" "start_index_generation_lambda" {
       },
     ],
   })
-
-  tags = local.common_tags
 }
 
 resource "aws_iam_role_policy" "start_index_generation_lambda" {
@@ -186,7 +188,7 @@ resource "aws_iam_role_policy" "start_index_generation_lambda" {
         Action : [
           "s3:ListBucket",
         ],
-        Resource : "arn:aws:s3:::${var.DEPLOYMENT_ENVIRONMENT == "prod" ? "czid-public-references" : "idseq-database"}",
+        Resource : "arn:aws:s3:::seqtoid-public-references", # TODO: aws_s3_bucket.cypherid-public-references[0].arn
       },
       {
         Effect : "Allow",
@@ -210,23 +212,23 @@ resource "aws_lambda_function" "start_index_generation" {
   filename         = data.archive_file.lambda_archive.output_path
 
   role = aws_iam_role.start_index_generation_lambda.arn
-  tags = local.common_tags
 
   environment {
     variables = {
       DEPLOYMENT_ENVIRONMENT            = var.DEPLOYMENT_ENVIRONMENT
       INDEX_GENERATION_SFN_ARN          = module.swipe.sfn_arns["index-generation"]
-      INDEX_GENERATION_WORKFLOW_VERSION = "v2.4.4"
+      INDEX_GENERATION_WORKFLOW_VERSION = "v2.4.4" # Why is this hardcoded, and the most recent seems to be v2.4.8
       AWS_ACCOUNT_ID                    = var.AWS_ACCOUNT_ID
       MEMORY                            = "480000"
       VCPU                              = "60"
-      BUCKET                            = var.DEPLOYMENT_ENVIRONMENT == "prod" ? "czid-public-references" : "idseq-database"
+      BUCKET                            = data.aws_s3_bucket.public-references.bucket
+      S3_WORKFLOWS_BUCKET               = aws_s3_bucket.workflows.bucket
     }
   }
 }
 
-// disabled because index generation script is broken
-// 
+// TODO: disabled because index generation script is broken
+//
 // resource "aws_lambda_permission" "start_index_generation_eventbridge" {
 //   statement_id  = "AllowExecutionFromCloudWatch"
 //   action        = "lambda:InvokeFunction"

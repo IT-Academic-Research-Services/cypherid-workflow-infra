@@ -6,29 +6,45 @@ on:
     inputs:
       environment:
         description: 'The environment to which to deploy'
-        required: false
+        required: true
         type: string
         default: 'dev'
 
 env:
   AWS_REGION : us-west-2
+  GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+  DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment }}
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  AssumeRoleAndCallIdentity:
+  DeployTerraform:
     runs-on: ubuntu-latest
     steps:
       - name: Git clone the repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: configure aws credentials
-        uses: aws-actions/configure-aws-credentials@v1.7.0
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::941377154785:role/gha-cypherid-workflow-infra-terraform #change to reflect your IAM role’s ARN
+          role-to-assume: arn:aws:iam::941377154785:role/gha-seqtoid
           role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
       - name: Sts GetCallerIdentity
         run: |
           aws sts get-caller-identity
+    #   - name: Install initial tools required by report_deployment_status.sh
+    #     run: |
+    #       sudo apt-get update
+    #       sudo apt-get install jq
+    #       sudo apt-get install -y httpie
+    #   - name: Output GH Event Data
+    #     run: |
+    #       jq -r . "$GITHUB_EVENT_PATH"
+      - name: Deploy dev
+        run: |
+          #trap 'scripts/report_deployment_status.sh failure' ERR
+          #scripts/report_deployment_status.sh in_progress "Starting deployment"
+          source scripts/init_ci_runner.sh
+          make deploy
