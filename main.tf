@@ -1,7 +1,7 @@
 variable "environment" { type = string }
-variable "app_name" { 
-    type = string
-    default = "idseq"
+variable "app_name" {
+  type    = string
+  default = "idseq"
 }
 variable "owner" { type = string }
 
@@ -29,6 +29,10 @@ provider "aws" {
       managedBy   = "terraform"
       service     = "main"
     }
+  }
+  ignore_tags {
+    key_prefixes = ["QSConfigId-", "QSConfigName-"]
+    keys         = ["environment", "env", "owner", "project", "application", "managedBy"]
   }
 }
 

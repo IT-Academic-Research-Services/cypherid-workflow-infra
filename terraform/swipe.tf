@@ -1,8 +1,8 @@
 module "swipe" {
   source = "github.com/chanzuckerberg/swipe?ref=v1.4.9"
-  tags = merge(local.common_tags, {
+  tags = {
     Name = "swipe"
-  })
+  }
 
   app_name        = "idseq-swipe-${var.DEPLOYMENT_ENVIRONMENT}"
   job_policy_arns = [aws_iam_policy.idseq_batch_main_job.arn, "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"]

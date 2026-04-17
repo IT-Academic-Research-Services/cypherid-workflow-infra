@@ -1,13 +1,13 @@
 locals {
   service_name        = "idseq-${var.deployment_environment}-${var.alignment_algorithm}"
   provisioning_models = ["EC2", "SPOT"]
-  common_tags = {
-    managedBy = "terraform"
-    project   = "idseq"
-    env       = var.deployment_environment
-    service   = local.service_name
-    owner     = var.owner
-  }
+  # common_tags = {
+  #   managedBy = "terraform"
+  #   project   = "idseq"
+  #   env       = var.deployment_environment
+  #   service   = local.service_name
+  #   owner     = var.owner
+  # }
 }
 
 data "aws_ssm_parameter" "idseq_batch_ami" {
@@ -115,9 +115,9 @@ resource "aws_batch_compute_environment" "alignment_compute_environment" {
 
     instance_type = each.value["instance_type"]
 
-    tags = merge(local.common_tags, {
+    tags = {
       Name = "${local.service_name}-${each.key}-batch"
-    })
+    }
 
     image_id     = data.aws_ssm_parameter.idseq_batch_ami.value
     #TODO: Is this needed?

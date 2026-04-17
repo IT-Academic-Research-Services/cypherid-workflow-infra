@@ -95,9 +95,9 @@ resource "aws_batch_compute_environment" "index_generation_compute_environment" 
       */
     instance_type = var.DEPLOYMENT_ENVIRONMENT == "test" ? ["optimal"] : ["r5n.24xlarge"]
 
-    tags = merge(local.common_tags, {
+    tags = {
       Name = "${local.service_name}-batch"
-    })
+    }
 
     image_id           = data.aws_ssm_parameter.idseq_batch_ami.value
     #TODO: Is this needed?
