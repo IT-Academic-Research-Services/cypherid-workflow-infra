@@ -68,7 +68,7 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
-      - name: Setup Terraform Environment
+      - name: Terraform Plan
         # We manually create aws_config.json instead of using the 'init-tf' Makefile target, as that target also calls 'terraform init' without the '-upgrade' flag, which we need
         run: |
           set -x
@@ -78,11 +78,7 @@ jobs:
           mkdir -p "$TF_DATA_DIR"
           jq -n ".region=\"us-west-2\" | .bucket=env.TF_S3_BUCKET | .key=env.APP_NAME+env.DEPLOYMENT_ENVIRONMENT | .encrypt=true" > "$TF_DATA_DIR/aws_config.json"
           jq . "$TF_DATA_DIR/aws_config.json"
-      - name: Package Lambdas and create Templates
-        run: |
           make package-lambdas templates
-      - name: Terraform Plan
-        run: |
           terraform init -input=false -upgrade
           echo "Plan will be created in: ${{ github.workspace }}/tf.plan"
           set +e
