@@ -43,10 +43,16 @@ batch_queue_arns = os.environ.get("BATCH_QUEUE_ARNS", "").split()
 
 app = Chalice(app_name="idseq")
 
-# TODO: This whole file is a mess; Catching Step Function events for triggers that should never have been fired outside of swipe
-#  IE: swipe (the terraform module) creates Step Functions, Batch Jobs, and Lambda triggers already. Then we generate more, for some reason!
-#  And many times these functions misbehave or fails, as they expect values that don't exist (from events, Step Function ARNs, etc...)!!!
-#  It is likely that the swipe module already does most, if not all, of what we need already, so there is no need to create all these redundant lambdas
+
+# TODO: This whole file is a mess;
+#  Catching Step Function events for triggers that should never have been fired outside of swipe.
+#  IE: swipe (the terraform module) creates Step Functions, Batch Jobs, and Lambda triggers already.
+#  Then we generate more, for some reason!
+#  And many times these functions misbehave or fail, as they expect values that don't exist
+#  (from events, Step Function ARNs, etc...)!!!
+#  It is likely that the swipe module already does most, if not all, of what we need already,
+#  so there is probably no need to create most of these redundant lambdas, at all
+
 
 @app.lambda_function("preprocess-input")
 def preprocess_input(sfn_data, context):
@@ -110,7 +116,7 @@ def handle_failure(sfn_data, context):
             # "jobQueue": batch_queue_arns
         },
     },
-    name=f"process-batch-event",
+    name="process-batch-event",
 )
 def process_batch_event(event):
     print("process_batch_event", event.to_dict())
