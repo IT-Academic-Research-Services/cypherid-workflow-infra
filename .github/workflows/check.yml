@@ -1,4 +1,4 @@
-name: idseq-web check
+name: Run Check
 
 on:
   #  push
