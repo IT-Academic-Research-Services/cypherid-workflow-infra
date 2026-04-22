@@ -1,11 +1,23 @@
-name: Terraform Plan
-run-name: Terraform Plan in ${{ github.base_ref || github.ref_name }} by ${{ github.actor }}
+name: Plan only
+run-name: Plan only in env ${{ inputs.environment || github.base_ref || github.ref_name }} branch ${{ github.base_ref || github.ref_name }} by ${{ github.actor }}
 
 on:
+  push:
+    branches:
+      - development
+      - staging
+      - main
+      - 'releases/**'
+  pull_request:
+    branches:
+      - development
+      - staging
+      - main
+      - 'releases/**'
   workflow_dispatch:
     inputs:
       environment:
-        description: "Both Github Environment and AWS Environment"
+        description: Both Github Environment and AWS Environment
         required: true
         type: environment
         default: dev
@@ -19,8 +31,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.base_ref || github.ref_name }}-${{ inputs.environment }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref || github.run_id }}-${{ inputs.environment }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   should-plan:
@@ -62,28 +74,37 @@ jobs:
       - should-plan
     uses: ./.github/workflows/plan_call.yml
     with:
-      environment: "${{ needs.should-plan.outputs.environment }}"
+      environment: ${{ needs.should-plan.outputs.environment }}
     secrets: inherit
 
   plan-summary:
-    name: Terraform Plan Summary
-    if: ${{ !cancelled() }} # && contains(needs.plan.result, 'success') }}
+    name: Terraform Plan Results
+    #if: ${{ !cancelled() }} # && contains(needs.plan.result, 'success') }}
     runs-on: ubuntu-latest
     needs:
       - plan
     steps:
+      - name: Download Results
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.plan.outputs.result-artifact-id }}
+          path: results
       - name: Generate Summary
         run: |
-          plan_result=${{ needs.plan.result }}
-          echo "plan.result=$plan_result"
-          change_count=${{ needs.plan.outputs.change-count }}
-          echo "change_count=$change_count"
-          echo "|   | Status | Changes |" >> $GITHUB_STEP_SUMMARY
-          echo "| - | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
-          if [[ "$plan_result" != "success" ]]; then
-            echo "| :red_circle: | Error | $plan_result |" >> $GITHUB_STEP_SUMMARY
-          elif [[ "$change_count" == "0" ]]; then
-            echo "| :green_circle: | Success | No Changes |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| :yellow_circle: | Success | $change_count |" >> $GITHUB_STEP_SUMMARY
-          fi
+          ls -al results/
+          ls -al results/*/
+          jq --slurp . results/*/*.json
+
+          echo "|   | Total Changes |" >> $GITHUB_STEP_SUMMARY
+          echo "| - | ------------- |" >> $GITHUB_STEP_SUMMARY
+          jq -n '{change_count: [inputs.change_count] | add}' results/*/*.json | jq -r '"|\(if .change_count == 0 then ":green_circle:" else ":yellow_circle:" end)|\(.change_count)|"'
+          jq -n '{change_count: [inputs.change_count] | add}' results/*/*.json | jq -r '"|\(if .change_count == 0 then ":green_circle:" else ":yellow_circle:" end)|\(.change_count)|"' >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<br/>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "| Action | Address |" >> $GITHUB_STEP_SUMMARY
+          echo "| ------ | ------- |" >> $GITHUB_STEP_SUMMARY
+          jq -r '.resource_changes[] | "|\(.action)|\(.address)|"' results/*/*.json
+          jq -r '.resource_changes[] | "|\(.action)|\(.address)|"' results/*/*.json >> $GITHUB_STEP_SUMMARY

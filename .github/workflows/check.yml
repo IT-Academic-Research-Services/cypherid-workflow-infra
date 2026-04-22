@@ -1,0 +1,35 @@
+name: idseq-web check
+
+on:
+  #  push
+  workflow_dispatch:
+
+jobs:
+  python:
+    name: Check Python
+    runs-on: ubuntu-latest
+    steps:
+      - name: Git clone the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Cache Python Dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.9' # TODO: 3.8?
+          cache: pip
+          #pip-version:
+          pip-install: -r requirements-dev.txt
+      - name: Run flake8
+        uses: julianwachholz/flake8-action@v2
+        with:
+          checkName: "Python Lint"
+#          plugins: flake8-spellcheck
+#      - name: Test # TODO: need to setup localstack
+#        run: python3 -m unittest discover -v -s test/ -p 'test_*.py'
