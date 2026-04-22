@@ -1,3 +1,4 @@
 [flake8]
-max-line-length=120
+max-line-length=140
 exclude=.venv
+per-file-ignores = scripts/generate_host_genome.py: E501, scripts/snowflake_write.py: E501
