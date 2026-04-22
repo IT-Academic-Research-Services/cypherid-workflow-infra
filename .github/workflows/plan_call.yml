@@ -24,6 +24,7 @@ jobs:
     name: Plan
     environment: ${{ inputs.environment }}
     runs-on: ubuntu-latest
+    permissions: write-all
     env:
       AWS_REGION: us-west-2
     outputs:

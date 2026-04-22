@@ -26,9 +26,9 @@ env:
   branch_name: ${{ github.base_ref || github.ref_name }}
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-permissions:
-  id-token: write
-  contents: read
+permissions: write-all
+#  id-token: write
+#  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref || github.run_id }}-${{ inputs.environment }}
