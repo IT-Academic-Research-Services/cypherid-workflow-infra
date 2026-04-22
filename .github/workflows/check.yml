@@ -9,14 +9,15 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
   cancel-in-progress: true
 
-permissions:
-  id-token: write
-  contents: read
+permissions: write-all
+#  id-token: write
+#  contents: read
 
 jobs:
   check-python:
     name: Check Python
     runs-on: ubuntu-latest
+    permissions: write-all
     steps:
       - name: Git clone the repository
         uses: actions/checkout@v6
