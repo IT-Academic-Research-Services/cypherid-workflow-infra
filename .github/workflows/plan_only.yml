@@ -1,5 +1,5 @@
-name: Plan only
-run-name: Plan only in env ${{ inputs.environment || github.base_ref || github.ref_name }} branch ${{ github.base_ref || github.ref_name }} by ${{ github.actor }}
+name: Terraform Plan
+run-name: Terraform Plan in env ${{ inputs.environment || github.base_ref || github.ref_name }} branch ${{ github.base_ref || github.ref_name }} by ${{ github.actor }}
 
 on:
   push:
