@@ -9,15 +9,19 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
   cancel-in-progress: true
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
-  python:
+  check-python:
     name: Check Python
     runs-on: ubuntu-latest
     steps:
       - name: Git clone the repository
         uses: actions/checkout@v6
         with:
-          persist-credentials: false
+          persist-credentials: true
       - name: Cache Python Dependencies
         uses: actions/cache@v5
         with:
@@ -32,9 +36,11 @@ jobs:
           #pip-version:
           pip-install: -r requirements-dev.txt
       - name: Run flake8
-        uses: julianwachholz/flake8-action@v2
+        uses: julianwachholz/flake8-action@v2.0.2
         with:
-          checkName: "Python Lint"
-#          plugins: flake8-spellcheck
-#      - name: Test # TODO: need to setup localstack
-#        run: python3 -m unittest discover -v -s test/ -p 'test_*.py'
+          checkName: 'check-python' # NOTE: this needs to be the same as the job name
+          #plugins: flake8-spellcheck
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #- name: Test # TODO: need to setup localstack
+      #  run: python3 -m unittest discover -v -s test/ -p 'test_*.py'
