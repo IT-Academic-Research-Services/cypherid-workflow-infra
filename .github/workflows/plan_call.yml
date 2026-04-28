@@ -24,7 +24,7 @@ jobs:
     name: Plan
     environment: ${{ inputs.environment }}
     runs-on: ubuntu-latest
-    permissions: write-all
+    #permissions: write-all
     env:
       AWS_REGION: us-west-2
     outputs:
@@ -45,23 +45,26 @@ jobs:
           verbose: false
           arch: amd64
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v6.1.0
         if: ${{ !env.ACT }}
+        uses: aws-actions/configure-aws-credentials@v6.1.0
         with:
           role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-executor
+          #output-credentials: true
           output-env-credentials: true
-          #role-session-name: GitHub_to_AWS_via_FederatedOIDC
+          role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
           aws-profile: idseq-${{ inputs.environment }}
       - name: Configure AWS Credentials for local execution using nektos act
-        uses: aws-actions/configure-aws-credentials@v6.1.0
         if: ${{ env.ACT }}
+        uses: aws-actions/configure-aws-credentials@v6.1.0
         with:
+          role-to-assume: czid-${{ inputs.environment }}-gh-actions-executor
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          #output-credentials: true
           output-env-credentials: true
-          #role-session-name: GitHub_to_AWS_via_FederatedOIDC
+          role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
           aws-profile: idseq-${{ inputs.environment }}
       - name: Setup Terraform
@@ -72,6 +75,7 @@ jobs:
       - name: Terraform Plan
         # We manually create aws_config.json instead of using the 'init-tf' Makefile target, as that target also calls 'terraform init' without the '-upgrade' flag, which we need
         run: |
+          aws sts get-caller-identity --profile "idseq-${{ inputs.environment }}" --no-cli-pager --no-cli-auto-prompt
           set -x
           source "environment.${{ inputs.environment }}"
           set +x
