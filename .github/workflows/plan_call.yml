@@ -1,4 +1,4 @@
-name: Plan Call
+name: Terraform Plan Call
 
 on:
   workflow_call:
@@ -21,7 +21,7 @@ env:
 
 jobs:
   plan:
-    name: Plan
+    name: Terraform Plan
     environment: ${{ inputs.environment }}
     runs-on: ubuntu-latest
     #permissions: write-all
