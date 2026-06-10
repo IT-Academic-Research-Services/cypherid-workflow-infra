@@ -1,0 +1,77 @@
+name: Terraform Apply
+
+on:
+  workflow_run:
+    workflows: ["Terraform Plan"]
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      run-id:
+        description: Github Action Workflow Run ID to get Plan Artifacts from
+        type: number
+        required: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  TERRAFORM_VERSION: "1.14.8"
+
+jobs:
+  apply:
+    name: Apply
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    environment: 
+      name: ${{ github.event.workflow_run.head_branch }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: us-west-2
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Git clone the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Reconfigure Git to use HTTP authentication
+        run: |
+          git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+      - name: Install AWS CLI
+        uses: unfor19/install-aws-cli-action@v1
+        with:
+          version: 2
+          verbose: false
+          arch: amd64
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ github.event.workflow_run.head_branch }}-gh-actions-executor
+          output-env-credentials: true
+          role-session-name: GitHub_to_AWS_via_FederatedOIDC
+          aws-region: ${{ env.AWS_REGION }}
+          aws-profile: idseq-${{ github.event.workflow_run.head_branch }}
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: Download Plan Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: plan
+          path: .
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Terraform Apply
+        run: |
+          aws sts get-caller-identity --profile "idseq-${{ github.event.workflow_run.head_branch }}" --no-cli-pager --no-cli-auto-prompt
+          set -x
+          source "environment.${{ github.event.workflow_run.head_branch }}"
+          set +x
+          echo "TF_DATA_DIR=$TF_DATA_DIR"
+          mkdir -p "$TF_DATA_DIR"
+          jq -n ".region=\"us-west-2\" | .bucket=env.TF_S3_BUCKET | .key=env.APP_NAME+env.DEPLOYMENT_ENVIRONMENT | .encrypt=true" > "$TF_DATA_DIR/aws_config.json"
+          jq . "$TF_DATA_DIR/aws_config.json"
+          make package-lambdas templates
+          terraform init -input=false -upgrade
+          terraform apply -input=false -auto-approve "tf.plan"
