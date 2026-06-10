@@ -1,10 +1,10 @@
 name: Terraform Apply
 
 on:
-  workflow_run:
-    workflows: ["Terraform Plan"]
-    types:
-      - completed
+#  workflow_run:
+#    workflows: ["Terraform Plan"]
+#    types:
+#      - completed
   workflow_dispatch:
     inputs:
       run-id:
