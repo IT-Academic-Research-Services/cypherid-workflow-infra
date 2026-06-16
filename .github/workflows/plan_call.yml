@@ -82,7 +82,10 @@ jobs:
           make package-lambdas templates
       - name: OpenTofu Plan
         run: |
-          tofu init -input=false -upgrade
+          # No -upgrade: provider versions are pinned by the committed
+          # .terraform.lock.hcl so plans are reproducible and a malicious/broken
+          # provider release can't slip in between runs (CZID-30 / STATE-2).
+          tofu init -input=false
           echo "Plan will be created in: ${{ github.workspace }}/tf.plan"
           set +e
           tofu plan -input=false -detailed-exitcode -refresh=false -out="${{ github.workspace }}/tf.plan"
