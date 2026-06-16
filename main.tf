@@ -6,7 +6,7 @@ variable "app_name" {
 variable "owner" { type = string }
 
 terraform {
-  required_version = ">= 1.14.3"
+  required_version = ">= 1.10" # >= 1.10 for native S3 state locking (use_lockfile)
   required_providers {
     aws = {
       version = "~> 4.54"

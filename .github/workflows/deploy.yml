@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 jobs:
-  DeployTerraform:
+  DeployOpenTofu:
     runs-on: ubuntu-latest
     steps:
       - name: Git clone the repository

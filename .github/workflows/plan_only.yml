@@ -2,18 +2,10 @@ name: Plan only
 run-name: Plan only in env ${{ inputs.environment || github.base_ref || github.ref_name }} branch ${{ github.base_ref || github.ref_name }} by ${{ github.actor }}
 
 on:
-  push:
-    branches:
-      - development
-      - staging
-      - main
-      - 'releases/**'
-  pull_request:
-    branches:
-      - development
-      - staging
-      - main
-      - 'releases/**'
+  # Planning assumes an AWS OIDC role (czid-<env>-gh-actions-executor) and reads
+  # the real S3 backend, so it can't run until GitHub Environments + OIDC roles
+  # exist (CZID-81 / CZID-26). Until then it is manual-only; the no-AWS
+  # validate.yml is the automatic push/PR gate.
   workflow_dispatch:
     inputs:
       environment:
@@ -36,7 +28,7 @@ concurrency:
 
 jobs:
   should-plan:
-    name: Check if Terraform Plan should be performed
+    name: Check if OpenTofu Plan should be performed
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     outputs:
@@ -68,7 +60,7 @@ jobs:
           fi
 
   plan:
-    name: Execute Terraform Plan
+    name: Execute OpenTofu Plan
     if: ${{ !cancelled() && needs.should-plan.outputs.environment }}
     needs:
       - should-plan
@@ -78,7 +70,7 @@ jobs:
     secrets: inherit
 
   plan-summary:
-    name: Terraform Plan Results
+    name: OpenTofu Plan Results
     #if: ${{ !cancelled() }} # && contains(needs.plan.result, 'success') }}
     runs-on: ubuntu-latest
     needs:

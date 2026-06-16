@@ -7,28 +7,28 @@ endif
 deploy: package-lambdas templates init-tf
 	#@if [[ $(DEPLOYMENT_ENVIRONMENT) == staging && $$(git symbolic-ref --short HEAD) != staging ]]; then echo Please deploy staging from the staging branch; exit 1; fi
 	@if [[ $(DEPLOYMENT_ENVIRONMENT) == prod && $$(git symbolic-ref --short HEAD) != prod ]]; then echo Please deploy prod from the prod branch; exit 1; fi
-	terraform apply
+	tofu apply
 
 # NOTE: moto errors on creating ssm parameters that begin with aws or ssm
 deploy-mock: templates package-lambdas
 	aws ssm put-parameter --name /mock-aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id --value ami-12345678 --type String --endpoint-url http://localhost:9000
-	(cd test; rm -rf .terraform* terraform.tfstate; unset TF_CLI_ARGS_init; terraform init; terraform apply --auto-approve)
+	(cd test; rm -rf .terraform* terraform.tfstate; unset TF_CLI_ARGS_init; tofu init; tofu apply --auto-approve)
 
 plan: package-lambdas templates init-tf
-	terraform plan
+	tofu plan
 
 templates:
 	for sfn_tpl in terraform/sfn_templates/*.yml; do yq . $$sfn_tpl > $${sfn_tpl/.yml/.json}; done
 	if [[ $(DEPLOYMENT_ENVIRONMENT) == test ]]; then sed -i '/Memory/ d' terraform/sfn_templates/*.json; fi
 
 $(TFSTATE_FILE):
-	terraform state pull > $(TFSTATE_FILE)
+	tofu state pull > $(TFSTATE_FILE)
 
 init-tf:
 	-rm -f $(TF_DATA_DIR)/*.tfstate
 	mkdir -p $(TF_DATA_DIR)
 	jq -n ".region=\"us-west-2\" | .bucket=env.TF_S3_BUCKET | .key=env.APP_NAME+env.DEPLOYMENT_ENVIRONMENT | .encrypt=true" > $(TF_DATA_DIR)/aws_config.json
-	terraform init
+	tofu init
 
 package-lambdas:
 	python3 scripts/package_lambda.py
