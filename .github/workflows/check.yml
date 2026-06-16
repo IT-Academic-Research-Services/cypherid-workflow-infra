@@ -22,7 +22,7 @@ jobs:
             ${{ runner.os }}-pip
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.9' # TODO: 3.8?
+          python-version-file: .python-version
           cache: pip
           #pip-version:
           pip-install: -r requirements-dev.txt

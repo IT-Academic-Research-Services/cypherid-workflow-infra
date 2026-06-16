@@ -174,7 +174,7 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-.python-version
+# .python-version is committed as the Python SSOT (read by check.yml) — CZID-142
 .terraform.dev
 .terraform.prod
 .terraform.sandbox
