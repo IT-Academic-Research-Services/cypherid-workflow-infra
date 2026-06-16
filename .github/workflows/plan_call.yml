@@ -102,7 +102,7 @@ jobs:
       #    jq -cn '$ARGS.positional' --jsonargs '{"address": "foo", "action": "create"}' '{"address": "bar", "action": "update"}' '{"address": "baz", "action": "delete"}' > "${{ github.workspace }}/resource_changes.json"
       - name: Upload Plan as Artifact
         id: upload-plan
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: plan
           path: ${{ github.workspace }}/tf.plan
