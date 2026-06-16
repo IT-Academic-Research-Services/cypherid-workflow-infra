@@ -1,0 +1,66 @@
+name: OpenTofu Validate
+
+# fmt + validate gate (CZID-16). Runs on ubuntu-latest (linux/amd64) — required:
+# the vendored swipe module uses the deprecated hashicorp/template provider, which
+# publishes no darwin_arm64 build, so this cannot run on Apple-Silicon self-hosted
+# runners. tofu validate needs the chalice lambda modules, so we run the same
+# `make package-lambdas` codegen the plan workflow uses before init/validate.
+
+on:
+  push:
+    branches:
+      - development
+      - staging
+      - main
+      - 'releases/**'
+  pull_request:
+    branches:
+      - development
+      - staging
+      - main
+      - 'releases/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  validate:
+    name: tofu fmt + validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Git clone the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Reconfigure Git to use HTTP authentication
+        # The swipe module source is github.com/...; CI runners have no SSH key.
+        run: git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version_file: .opentofu-version
+          tofu_wrapper: false
+      - name: tofu fmt -check
+        # Check committed config only — run before codegen so generated
+        # files (variables.tf, chalice.tf.json) are not formatting-gated.
+        run: tofu fmt -check -recursive
+      - name: Package Lambdas (codegen prerequisite for validate)
+        run: |
+          source ./environment.test
+          make package-lambdas
+      - name: tofu init + validate
+        run: |
+          source ./environment.test
+          # environment.test exports TF_CLI_ARGS_init (--backend-config) for real
+          # applies; clear it so `tofu init -backend=false` doesn't conflict.
+          unset TF_CLI_ARGS_init TF_CLI_ARGS_output
+          tofu init -backend=false -input=false
+          tofu validate
