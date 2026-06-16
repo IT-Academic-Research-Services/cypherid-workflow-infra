@@ -64,3 +64,17 @@ jobs:
           unset TF_CLI_ARGS_init TF_CLI_ARGS_output
           tofu init -backend=false -input=false
           tofu validate
+      - name: Verify provider lockfile is committed and current
+        # `tofu init` above updates .terraform.lock.hcl in place if a provider
+        # constraint changed without re-locking (or creates it if missing). Fail
+        # the build on any drift so provider versions stay pinned + reproducible
+        # and a malicious/broken provider release can't slip in (CZID-30).
+        run: |
+          if [ ! -f .terraform.lock.hcl ]; then
+            echo "::error::.terraform.lock.hcl is missing — run 'tofu providers lock -platform=linux_amd64 -platform=darwin_amd64' and commit it."
+            exit 1
+          fi
+          if ! git diff --exit-code -- .terraform.lock.hcl; then
+            echo "::error::.terraform.lock.hcl drifted during init — re-run 'tofu providers lock' and commit the result."
+            exit 1
+          fi

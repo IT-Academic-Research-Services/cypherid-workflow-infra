@@ -180,8 +180,12 @@ cython_debug/
 .terraform.sandbox
 .terraform.staging
 .terraform.test
-.terraform.lock.hcl
+# Provider/module install dir is never committed. The lockfile
+# (.terraform.lock.hcl) IS committed at the repo root for reproducible CI
+# (CZID-30) — only the ephemeral mock-harness lock under test/ stays ignored
+# (make deploy-mock regenerates it each run).
+.terraform/
+/test/.terraform.lock.hcl
 /terraform/sfn_templates/index-generation.json
 /terraform/sfn_templates/short-read-mngs.json
 /terraform/variables.tf
-/.terraform/modules/modules.json
