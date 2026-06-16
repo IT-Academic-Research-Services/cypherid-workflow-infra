@@ -99,7 +99,7 @@ resource "aws_batch_compute_environment" "index_generation_compute_environment" 
       Name = "${local.service_name}-batch"
     }
 
-    image_id           = data.aws_ssm_parameter.idseq_batch_ami.value
+    image_id = data.aws_ssm_parameter.idseq_batch_ami.value
     #TODO: Is this needed?
     # ec2_key_pair       = "idseq-${var.DEPLOYMENT_ENVIRONMENT}"
     min_vcpus          = 0
