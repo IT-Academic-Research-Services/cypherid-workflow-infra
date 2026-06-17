@@ -16,6 +16,18 @@ resource "aws_s3_bucket" "workflows" {
   force_destroy = true
 }
 
+# Block all public access. The workflows bucket is private (the bucket policy
+# below grants read only to the account root), so this just enforces it at the
+# bucket level — defense-in-depth against an accidental public ACL/policy.
+# (CZID-57 / Trivy AWS-0086–0093, Checkov CKV2_AWS_6.)
+resource "aws_s3_bucket_public_access_block" "workflows" {
+  bucket                  = aws_s3_bucket.workflows.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
 resource "aws_s3_bucket_versioning" "workflows" {
   bucket = aws_s3_bucket.workflows.id
   versioning_configuration {
