@@ -31,6 +31,7 @@ locals {
 }
 
 resource "aws_launch_template" "alignment_launch_template_ec2" {
+  # checkov:skip=CKV_AWS_341:hop_limit=2 is required for AWS Batch container workloads to reach IMDS (container→host→IMDS = 2 hops). IMDSv2 is still enforced via http_tokens=required. (CZID-57)
   # AWS Batch pins a specific version of the launch template when a compute environment is created.
   # The CE does not support updating this version, and needs replacing (redeploying) if launch template contents change.
   # The launch template resource increments its version when contents change, but the compute environment resource does
@@ -67,6 +68,7 @@ resource "aws_launch_template" "alignment_launch_template_ec2" {
 }
 
 resource "aws_launch_template" "alignment_launch_template_spot" {
+  # checkov:skip=CKV_AWS_341:hop_limit=2 is required for AWS Batch container workloads to reach IMDS (container→host→IMDS = 2 hops). IMDSv2 is still enforced via http_tokens=required. (CZID-57)
   # AWS Batch pins a specific version of the launch template when a compute environment is created.
   # The CE does not support updating this version, and needs replacing (redeploying) if launch template contents change.
   # The launch template resource increments its version when contents change, but the compute environment resource does
