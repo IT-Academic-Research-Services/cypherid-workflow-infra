@@ -1,6 +1,6 @@
 # Default Dockerfile for lambdas, packages with chalice
 #   scripts/package_lambda.py will use this to build images if it doesn't find a dockerfile
-FROM python:3.8
+FROM python:3.12
 
 COPY requirements.txt .
 RUN pip install -r requirements.txt

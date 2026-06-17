@@ -9,7 +9,7 @@ terraform {
   required_version = ">= 1.14.3"
   required_providers {
     aws = {
-      version = "~> 4.54"
+      version = "~> 5.100.0"
     }
   }
   backend "s3" {
@@ -32,7 +32,7 @@ provider "aws" {
   }
   ignore_tags {
     key_prefixes = ["QSConfigId-", "QSConfigName-"]
-    keys         = ["environment", "env", "owner", "project", "application", "managedBy"]
+    # keys         = ["Name", "environment", "env", "owner", "project", "application", "managedBy", "service"]
   }
 }
 
