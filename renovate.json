@@ -1,0 +1,56 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":maintainLockFilesDisabled"
+  ],
+  "timezone": "America/Los_Angeles",
+  "schedule": ["before 9am on monday"],
+  "labels": ["dependencies"],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "rebaseWhen": "conflicted",
+  "pinDigests": true,
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Track the OpenTofu version pinned in .opentofu-version.",
+      "fileMatch": ["(^|/)\\.opentofu-version$"],
+      "matchStrings": ["^(?<currentValue>\\S+)"],
+      "depNameTemplate": "opentofu/opentofu",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Group Terraform/OpenTofu provider + module updates into one PR (providers are declared in main.tf, test/mock.tf, and the swipe-generated modules).",
+      "matchManagers": ["terraform"],
+      "groupName": "terraform providers"
+    },
+    {
+      "description": "Group the lambda Docker base images, preserving any pinned @sha256 digests.",
+      "matchManagers": ["dockerfile"],
+      "groupName": "docker base images"
+    },
+    {
+      "description": "Group the lambda pip deps (lambdas/*/requirements.txt, requirements-dev.txt).",
+      "matchManagers": ["pip_requirements"],
+      "groupName": "pip deps"
+    },
+    {
+      "description": "Group the lambda npm deps (taxon-indexing-concurrency-manager).",
+      "matchManagers": ["npm"],
+      "groupName": "npm deps"
+    },
+    {
+      "description": "Group GitHub Actions bumps into one PR.",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions"
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true
+  }
+}
