@@ -27,10 +27,13 @@ jobs:
           #pip-version:
           pip-install: -r requirements-dev.txt
       - name: Run flake8
-        # Was julianwachholz/flake8-action@v2 (runs.using: node16 — past EOL,
-        # force-run on a newer Node and removed from runners). flake8 is already
-        # installed via requirements-dev.txt (setup-python step above), so invoke
-        # it directly — no third-party Node action, nothing to keep node-current.
-        run: flake8
+        # Our modernized flake8-action (upstream julianwachholz is node16/EOL),
+        # pinned to the SSOT `v2` moving tag in thorvath-slower/flake8-action —
+        # the single source of truth for the version across all repos. See CZID-204.
+        uses: thorvath-slower/flake8-action@v2
+        with:
+          checkName: "Python Lint"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 #      - name: Test # TODO: need to setup localstack
 #        run: python3 -m unittest discover -v -s test/ -p 'test_*.py'
