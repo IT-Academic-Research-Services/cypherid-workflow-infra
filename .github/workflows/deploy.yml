@@ -26,7 +26,7 @@ jobs:
       - name: Git clone the repository
         uses: actions/checkout@v6
       - name: configure aws credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6.1.0
         with:
           role-to-assume: arn:aws:iam::941377154785:role/gha-seqtoid
           role-session-name: GitHub_to_AWS_via_FederatedOIDC
