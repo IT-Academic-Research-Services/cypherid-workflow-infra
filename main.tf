@@ -32,7 +32,7 @@ provider "aws" {
   }
   ignore_tags {
     key_prefixes = ["QSConfigId-", "QSConfigName-"]
-    # keys         = ["Name", "environment", "env", "owner", "project", "application", "managedBy", "service"]
+    keys         = ["Name", "environment", "env", "owner", "project", "application", "managedBy", "service"]
   }
 }
 
