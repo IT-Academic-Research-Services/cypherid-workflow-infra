@@ -7,7 +7,6 @@ from os.path import join
 from string import Template
 from subprocess import run
 
-
 logging.basicConfig(level=logging.INFO)
 
 
@@ -77,6 +76,7 @@ def package_lambda(name: str):
         with open(terraform_json_path) as f:
             terraform_json = json.load(f)
         del terraform_json['terraform']['required_version']
+        del terraform_json['terraform']['required_providers']['aws']
         if deployment_environment == 'test' and 'aws_lambda_permission' in terraform_json.get('resource'):
             # Disabled due to lack of support in moto
             del terraform_json['resource']['aws_lambda_permission']

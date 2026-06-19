@@ -34,7 +34,7 @@ import logging
 
 from chalice import Chalice, Rate
 
-from sfn_io_helper import batch_events, reporting, stage_io
+from chalicelib import batch_events, reporting, stage_io
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -42,6 +42,16 @@ logger.setLevel(logging.INFO)
 batch_queue_arns = os.environ.get("BATCH_QUEUE_ARNS", "").split()
 
 app = Chalice(app_name="idseq")
+
+
+# TODO: This whole file is a mess;
+#  Catching Step Function events for triggers that should never have been fired outside of swipe.
+#  IE: swipe (the terraform module) creates Step Functions, Batch Jobs, and Lambda triggers already.
+#  Then we generate more, for some reason!
+#  And many times these functions misbehave or fail, as they expect values that don't exist
+#  (from events, Step Function ARNs, etc...)!!!
+#  It is likely that the swipe module already does most, if not all, of what we need already,
+#  so there is probably no need to create most of these redundant lambdas, at all
 
 
 @app.lambda_function("preprocess-input")
@@ -106,9 +116,10 @@ def handle_failure(sfn_data, context):
             # "jobQueue": batch_queue_arns
         },
     },
-    name=f"idseq-{os.environ['DEPLOYMENT_ENVIRONMENT']}-process-batch-event",
+    name="process-batch-event",
 )
 def process_batch_event(event):
+    print("process_batch_event", event.to_dict())
     queue_arn = event.detail["jobQueue"]
     # assert queue_arn in batch_queue_arns
     batch_events.resize_compute_environment(queue_arn)
@@ -121,9 +132,10 @@ def process_batch_event(event):
         "source": ["aws.states"],
         "detail-type": ["Step Functions Execution Status Change"],
     },
-    name=f"idseq-{os.environ['DEPLOYMENT_ENVIRONMENT']}-process-sfn-event",
+    name="process-sfn-event",
 )
 def process_sfn_event(event):
+    print("process_sfn_event", event.to_dict())
     try:
         execution_arn = event.detail["executionArn"]
         if event.detail["status"] in {"ABORTED", "TIMED_OUT"}:
@@ -139,6 +151,7 @@ def process_sfn_event(event):
 
 @app.schedule(Rate(1, unit=Rate.MINUTES))
 def report_metrics(event):
+    print("report_metrics", event.to_dict())
     reporting.emit_periodic_metrics()
 
 
@@ -149,4 +162,5 @@ def report_metrics(event):
     }
 )
 def report_spot_interruption(event):
+    print("report_spot_interruption", event.to_dict())
     reporting.emit_spot_interruption_metric(event)

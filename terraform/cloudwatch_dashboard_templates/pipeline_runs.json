@@ -76,7 +76,7 @@
             "AlignmentAlgorithm",
             "gsnap",
             "IndexPath",
-            "s3://czid-public-references/alignment_indexes/2020-04-20",
+            "s3://seqtoid-public-references/alignment_indexes/2020-04-20",
             "InstanceType",
             "r5d.24xlarge",
             "IndexStorageType",

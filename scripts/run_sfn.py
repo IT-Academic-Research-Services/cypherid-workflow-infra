@@ -120,6 +120,7 @@ def print_log_line(event):
         elif level in log_colors:
             return " " + log_colors[level] + level + ENDC()
         return level
+
     try:
         if "aws sts get-caller-identity" in event["message"]:
             return
@@ -136,7 +137,7 @@ def print_log_line(event):
 
 
 @lru_cache()
-def find_host_filter_index(host_genome, index_type, database_bucket_name="czid-public-references"):
+def find_host_filter_index(host_genome, index_type, database_bucket_name="seqtoid-public-references"):
     assert index_type in {"bowtie2_genome.tar", "STAR_genome.tar"}
     index_obj = None
     for obj in s3.Bucket(database_bucket_name).objects.filter(Prefix=f"host_filter/{host_genome}"):
@@ -169,7 +170,7 @@ parser.add_argument("--host-genome", default="human")
 parser.add_argument("--max-input-fragments", default=9000)
 parser.add_argument("--max-subsample-fragments", default=9000)
 parser.add_argument("--adapter-fasta",
-                    default="s3://czid-public-references/adapter_sequences/illumina_TruSeq3-PE-2_NexteraPE-PE.fasta")
+                    default="s3://seqtoid-public-references/adapter_sequences/illumina_TruSeq3-PE-2_NexteraPE-PE.fasta")
 # TODO: make this smarter somehow
 parser.add_argument("--index-version", default="2021-01-22")
 parser.add_argument("--no-deuterostome-filter", action="store_false", dest="use_deuterostome_filter")
@@ -203,12 +204,12 @@ if args.sfn_name is None:
 
 if args.workflow_name == "short-read-mngs":
     index_manifest_key = path.join(path.dirname(boto3.client("s3").list_objects_v2(
-        Bucket="czid-public-references",
+        Bucket="seqtoid-public-references",
         MaxKeys=1,
         Prefix=f"ncbi-indexes-prod/{args.index_version}/",
     )["Contents"][0]["Key"]), "run_output.json")
     index_manifest = json.loads(
-        s3.Object("czid-public-references", index_manifest_key).get()["Body"].read().decode().strip()
+        s3.Object("seqtoid-public-references", index_manifest_key).get()["Body"].read().decode().strip()
     )
 
 if args.stages is None:
@@ -218,8 +219,10 @@ if args.stages is None:
         args.stages = ["run"]
 
 if args.sfn_arn is None:
-    args.sfn_arn = str(ARN(service="states",
-                           resource=f"stateMachine:idseq-swipe-{os.environ['DEPLOYMENT_ENVIRONMENT']}-{args.sfn_name}-wdl"))
+    args.sfn_arn = str(ARN(
+        service="states",
+        resource=f"stateMachine:idseq-swipe-{os.environ['DEPLOYMENT_ENVIRONMENT']}-{args.sfn_name}-wdl"
+    ))
 
 if args.workflow_version is None:
     github_api = "https://api.github.com"
@@ -329,9 +332,9 @@ def deep_merge(source, destination):
             destination[key] = value
 
     return destination
-    
-sfn_input = deep_merge(args.sfn_input, default_sfn_input)
 
+
+sfn_input = deep_merge(args.sfn_input, default_sfn_input)
 
 if fastqs:
     stage_key = list(sfn_input["Input"].keys())[0]

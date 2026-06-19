@@ -1,0 +1,132 @@
+name: Terraform Plan Call
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Both Github Environment and AWS Environment
+        type: string
+        required: true
+    outputs:
+      plan-artifact-id:
+        description: The Artifact ID of the generated Terraform Plan
+        value: ${{ jobs.plan.outputs.plan-artifact-id }}
+      result-artifact-id:
+        description: The Artifact ID of the Result JSON
+        value: ${{ jobs.plan.outputs.result-artifact-id }}
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  TERRAFORM_VERSION: "1.14.8"
+
+jobs:
+  plan:
+    name: Terraform Plan
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    #permissions: write-all
+    env:
+      AWS_REGION: us-west-2
+    outputs:
+      plan-artifact-id: ${{ steps.upload-plan.outputs.artifact-id }}
+      result-artifact-id: ${{ steps.upload-result.outputs.artifact-id }}
+    steps:
+      - name: Git clone the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Reconfigure Git to use HTTP authentication
+        run: |
+          git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+      - name: Install AWS CLI
+        uses: unfor19/install-aws-cli-action@v1
+        with:
+          version: 2
+          verbose: false
+          arch: amd64
+      - name: Configure AWS Credentials
+        if: ${{ !env.ACT }}
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-executor
+          #output-credentials: true
+          output-env-credentials: true
+          role-session-name: GitHub_to_AWS_via_FederatedOIDC
+          aws-region: ${{ env.AWS_REGION }}
+          aws-profile: idseq-${{ inputs.environment }}
+      - name: Configure AWS Credentials for local execution using nektos act
+        if: ${{ env.ACT }}
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          role-to-assume: czid-${{ inputs.environment }}-gh-actions-executor
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          #output-credentials: true
+          output-env-credentials: true
+          role-session-name: GitHub_to_AWS_via_FederatedOIDC
+          aws-region: ${{ env.AWS_REGION }}
+          aws-profile: idseq-${{ inputs.environment }}
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: Terraform Plan
+        # We manually create aws_config.json instead of using the 'init-tf' Makefile target, as that target also calls 'terraform init' without the '-upgrade' flag, which we need
+        run: |
+          aws sts get-caller-identity --profile "idseq-${{ inputs.environment }}" --no-cli-pager --no-cli-auto-prompt
+          set -x
+          source "environment.${{ inputs.environment }}"
+          set +x
+          echo "TF_DATA_DIR=$TF_DATA_DIR"
+          mkdir -p "$TF_DATA_DIR"
+          jq -n ".region=\"us-west-2\" | .bucket=env.TF_S3_BUCKET | .key=env.APP_NAME+env.DEPLOYMENT_ENVIRONMENT | .encrypt=true" > "$TF_DATA_DIR/aws_config.json"
+          jq . "$TF_DATA_DIR/aws_config.json"
+          make package-lambdas templates
+          terraform init -input=false -upgrade
+          echo "Plan will be created in: ${{ github.workspace }}/tf.plan"
+          set +e
+          terraform plan -input=false -detailed-exitcode -refresh=false -out="${{ github.workspace }}/tf.plan"
+          exitcode=$?
+          echo "Terraform exited with exit-code $exitcode"
+          if [[ $exitcode -eq 1 ]]; then
+            exit $exitcode
+          fi
+          set -e
+          terraform show -json "${{ github.workspace }}/tf.plan" > plan.json
+          jq '.resource_changes[] | select(.change.actions[0] != "no-op" and .change.actions[0] != "read")' plan.json | jq '{address, action: .change.actions[0]}' | jq -c --slurp . > "${{ github.workspace }}/resource_changes.json"
+          jq -c . "${{ github.workspace }}/resource_changes.json"
+      # TODO: Only uncomment for local execution via nektos act, when testing outputs and artifacts
+      #- name: Terraform Plan
+      #  run: |
+      #    echo foo > "${{ github.workspace }}/tf.plan"
+      #    jq -cn '$ARGS.positional' --jsonargs '{"address": "foo", "action": "create"}' '{"address": "bar", "action": "update"}' '{"address": "baz", "action": "delete"}' > "${{ github.workspace }}/resource_changes.json"
+      - name: Upload Plan as Artifact
+        id: upload-plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan
+          path: ${{ github.workspace }}/tf.plan
+          retention-days: 1
+          compression-level: 0 # Plan files are already pretty compact, and max compression gives at best 10% savings
+          if-no-files-found: error
+      - name: Create Result JSON
+        run: |
+          change_count=$(jq 'length' "${{ github.workspace }}/resource_changes.json")
+          echo "change-count=$change_count"
+          jq -cnS \
+            --arg artifact_name "plan" \
+            --arg artifact_id "${{ steps.upload-plan.outputs.artifact-id }}" \
+            --argjson change_count "$change_count" \
+            --argjson resource_changes $(<"${{ github.workspace }}/resource_changes.json") \
+            '$ARGS.named' > "${{ github.workspace }}/result.json"
+          jq . "${{ github.workspace }}/result.json"
+      - name: Upload Result JSON as Artifact
+        id: upload-result
+        uses: actions/upload-artifact@v5
+        with:
+          name: result
+          path: ${{ github.workspace }}/result.json
+          retention-days: 1
+          if-no-files-found: error

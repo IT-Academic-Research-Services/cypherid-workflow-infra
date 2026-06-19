@@ -14,18 +14,14 @@ import requests
 
 from simple_run_sfn import simple_run_sfn
 
-
-REFERENCES_BUCKET = 'czid-public-references'
-
+REFERENCES_BUCKET = 'seqtoid-public-references'
 
 sts = boto3.client('sts')
 s3 = boto3.resource('s3')
 s3_client = boto3.client('s3')
 
-
 parser = argparse.ArgumentParser(description="Script for generating host genomes")
 subparsers = parser.add_subparsers(help='Commands', dest='command')
-
 
 parser_generate = subparsers.add_parser('generate', help='Kick off the host genome generation job')
 parser_generate.add_argument(
@@ -71,7 +67,6 @@ parser_generate.add_argument(
     default=None,
 )
 
-
 parser_prerelease = subparsers.add_parser('prerelease', help='Prepare this host genome for release and generate a migration to add it to the database')
 parser_prerelease.add_argument(
     '-n',
@@ -113,7 +108,7 @@ def _tags():
         url = resp.links.get('next', {}).get('url')
 
 
-def _is_gzipped(filename): 
+def _is_gzipped(filename):
     with open(filename, 'rb') as f:
         return f.read(2) == b'\x1f\x8b'
 
@@ -151,7 +146,6 @@ def generate_host_genome(
         print(f'uploaded {filename} to {s3_path}')
         return s3_path
 
-
     _upload_to_s3_path_public(readme, "README.md", False)
 
     tag = next(tag for tag in _tags() if tag.startswith('host-genome-generation'))
@@ -188,7 +182,7 @@ def prerelease_host_genome(host_name: str, user_facing_host_name: str, czid_web_
     most_recent_outfile = [obj['Key'] for obj in res['Contents'] if obj['Key'].endswith('run_output.json')][-1]
 
     outputs = json.loads(s3.Bucket(REFERENCES_BUCKET).Object(most_recent_outfile).get()["Body"].read())
-    output_keys = { k: urlparse(v).path[1:] for k, v in outputs.items() if v and type(v) == str }
+    output_keys = {k: urlparse(v).path[1:] for k, v in outputs.items() if v and type(v) is str}
 
     print('making index public')
     for s3_key in output_keys.values():
