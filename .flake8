@@ -1,3 +1,15 @@
 [flake8]
 max-line-length=120
-exclude=.venv
+# .venv: virtualenv. compare_index_files.py: a DANGLING symlink (its target
+# ../workflows/docker-index-generation/compare_index_files.py was removed) — excluded so flake8 can run;
+# the broken symlink itself should be fixed/removed separately.
+exclude=.venv,scripts/compare_index_files.py
+
+# CZID-264 inherited-lint baseline. The flake8 gate was never enforced (check.yml was workflow_dispatch-only),
+# so these legacy violations in scripts/ are ACCEPTED; new code + new files are fully gated. Remediate these
+# separately (they're cosmetic — line-length, whitespace, one type-compare) if/when those scripts are touched.
+per-file-ignores=
+    scripts/generate_host_genome.py:E201,E202,E303,E501,E721,W291
+    scripts/run_sfn.py:E305,E501,W293
+    scripts/simple_run_sfn.py:E501
+    scripts/snowflake_write.py:E261,E401,E501,W291

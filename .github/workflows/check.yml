@@ -1,7 +1,20 @@
 name: idseq-web check
 
 on:
-  #  push
+  # CZID-204 — the Python flake8 lint is a no-AWS gate, so run it automatically on PRs (and on the
+  # protected branches post-merge), matching validate.yml. Plan/deploy stay manual (they need AWS OIDC).
+  push:
+    branches:
+      - development
+      - staging
+      - main
+      - 'releases/**'
+  pull_request:
+    branches:
+      - development
+      - staging
+      - main
+      - 'releases/**'
   workflow_dispatch:
 
 jobs:
