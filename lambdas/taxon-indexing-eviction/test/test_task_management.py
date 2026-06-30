@@ -2,6 +2,7 @@
 
 from chalicelib import task_management
 import test.test_data as test_data
+from unittest.mock import call
 
 
 class TestGetDeletionTaskStatuses:
@@ -242,12 +243,14 @@ class TestEvictByPipelineRunIds:
         )
 
         assert result == 0
-        spy_bulk_delete_taxons_by_pipeline_run_id.has_calls(
-            [["pipeline_run_id_1"], ["pipeline_run_id_2"]]
+        spy_bulk_delete_taxons_by_pipeline_run_id.assert_has_calls(
+            [call(["pipeline_run_id_1"]), call(["pipeline_run_id_2"])]
         )
-        spy_set_task_id_on_pipelines_being_deleted.has_calls(
-            ["aaaa-1111-aaaa-1111:1111", ["pipeline_run_id_1"]],
-            ["aaaa-1111-aaaa-1111:1111", ["pipeline_run_id_2"]],
+        spy_set_task_id_on_pipelines_being_deleted.assert_has_calls(
+            [
+                call("aaaa-1111-aaaa-1111:1111", ["pipeline_run_id_1"]),
+                call("aaaa-1111-aaaa-1111:1111", ["pipeline_run_id_2"]),
+            ]
         )
         spy_report_evictions_started.assert_called_once_with(
             [
@@ -404,12 +407,14 @@ class TestEvictByPipelineAndBackgroundId:
         )
 
         assert result == 0
-        spy_bulk_delete_taxons_by_pipeline_run_id_and_background_id.has_calls(
-            ["1", ["pipeline_run_id_1"]], ["1", ["pipeline_run_id_2"]]
+        spy_bulk_delete_taxons_by_pipeline_run_id_and_background_id.assert_has_calls(
+            [call("1", ["pipeline_run_id_1"]), call("1", ["pipeline_run_id_2"])]
         )
-        spy_set_task_id_on_pipelines_backgrounds_being_deleted.has_calls(
-            ["aaaa-1111-aaaa-1111:1111", "1", ["pipeline_run_id_1"]],
-            ["aaaa-1111-aaaa-1111:1111", "1", ["pipeline_run_id_2"]],
+        spy_set_task_id_on_pipelines_backgrounds_being_deleted.assert_has_calls(
+            [
+                call("aaaa-1111-aaaa-1111:1111", "1", ["pipeline_run_id_1"]),
+                call("aaaa-1111-aaaa-1111:1111", "1", ["pipeline_run_id_2"]),
+            ]
         )
         spy_report_evictions_started.assert_called_once_with(
             [
@@ -463,12 +468,14 @@ class TestEvictByPipelineAndBackgroundId:
         )
 
         assert result == 0
-        spy_bulk_delete_taxons_by_pipeline_run_id_and_background_id.has_calls(
-            ["1", ["pipeline_run_id_1"]], ["2", ["pipeline_run_id_2"]]
+        spy_bulk_delete_taxons_by_pipeline_run_id_and_background_id.assert_has_calls(
+            [call("1", ["pipeline_run_id_1"]), call("2", ["pipeline_run_id_2"])]
         )
-        spy_set_task_id_on_pipelines_backgrounds_being_deleted.has_calls(
-            ["aaaa-1111-aaaa-1111:1111", "1", ["pipeline_run_id_1"]],
-            ["aaaa-1111-aaaa-1111:1111", "2", ["pipeline_run_id_2"]],
+        spy_set_task_id_on_pipelines_backgrounds_being_deleted.assert_has_calls(
+            [
+                call("aaaa-1111-aaaa-1111:1111", "1", ["pipeline_run_id_1"]),
+                call("aaaa-1111-aaaa-1111:1111", "2", ["pipeline_run_id_2"]),
+            ]
         )
         spy_report_evictions_started.assert_called_once_with(
             [

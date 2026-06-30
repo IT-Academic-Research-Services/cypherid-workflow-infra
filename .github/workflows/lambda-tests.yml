@@ -1,0 +1,27 @@
+name: lambda unit tests
+
+# Runs the Chalice lambda unit suites on every PR/push so they cannot silently
+# rot again (they had been unwired from CI for years — see CZID-344). The suites
+# are pure unit tests (pytest-mock, no live AWS), so no localstack is needed; the
+# harness builds a clean venv with the lambdas' own (modernized) requirements.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  lambda-tests:
+    name: Lambda unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Git clone the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+          cache: pip
+      - name: Run lambda unit tests
+        run: bash lambdas/run_lambda_tests.sh

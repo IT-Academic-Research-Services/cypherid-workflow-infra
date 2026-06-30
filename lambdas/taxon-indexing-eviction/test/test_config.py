@@ -65,9 +65,9 @@ class TestGetParameters:
             "MYSQL_USERNAME": "test-mysql-username",
             "MYSQL_PASSWORD": "test-mysql-password",
             "ES_HOST": "test-es-host",
-            "DELETE_REQUESTS_PER_SECOND": 100,
-            "EVICTION_TASK_CONCURRENCY": 2,
-            "PIPELINE_RUNS_PER_TASK": 200,
+            "DELETE_REQUESTS_PER_SECOND": 1000,
+            "EVICTION_TASK_CONCURRENCY": 6,
+            "PIPELINE_RUNS_PER_TASK": 500,
             "PIPELINE_RUN_TTL_IN_DAYS": 30,
             "DRY_RUN": False
         }
@@ -107,9 +107,9 @@ class TestGetParameters:
             "MYSQL_USERNAME": "test-mysql-username",
             "MYSQL_PASSWORD": "test-mysql-password",
             "ES_HOST": "test-es-host",
-            "DELETE_REQUESTS_PER_SECOND": 100,
-            "EVICTION_TASK_CONCURRENCY": 2,
-            "PIPELINE_RUNS_PER_TASK": 200,
+            "DELETE_REQUESTS_PER_SECOND": 1000,
+            "EVICTION_TASK_CONCURRENCY": 6,
+            "PIPELINE_RUNS_PER_TASK": 500,
             "PIPELINE_RUN_TTL_IN_DAYS": 30,
             "DRY_RUN": False
         }
