@@ -1,0 +1,47 @@
+name: Publish WDL Workflow Version
+run-name: Publish ${{ inputs.workflow_tag }} to ${{ inputs.environment }}
+
+# Builds + publishes a single WDL workflow version (Docker image to ECR + WDL/JSON to the
+# per-environment workflows bucket) for a git release tag (e.g. short-read-mngs-v8.3.11).
+# See docs/WORKFLOW-VERSIONING.md for the versioning scheme + promotion model (#335).
+on:
+  workflow_dispatch:
+    inputs:
+      workflow_tag:
+        description: 'Workflow release tag (WORKFLOW_NAME-vX.Y.Z), e.g. short-read-mngs-v8.3.11'
+        required: true
+        type: string
+      environment:
+        description: 'Target environment (publishes into that env account''s workflows bucket)'
+        required: true
+        type: choice
+        options: [dev, staging, prod, sandbox]
+        default: 'dev'
+
+env:
+  AWS_REGION: us-west-2
+  AWS_DEFAULT_REGION: us-west-2
+  DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          role-to-assume: arn:aws:iam::941377154785:role/gha-seqtoid
+          role-session-name: GitHub_to_AWS_via_FederatedOIDC
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Resolve account id
+        run: echo "AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_ENV"
+      - name: Install miniwdl
+        run: pipx install miniwdl
+      - name: Publish workflow version
+        run: scripts/publish_wdl_workflows.sh "${{ inputs.workflow_tag }}"
