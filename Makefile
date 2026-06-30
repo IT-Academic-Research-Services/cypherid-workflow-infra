@@ -1,8 +1,16 @@
 SHELL=/bin/bash -o pipefail
 
+# `make check` (CZID-311 local CI) is exempt from this guard — it runs the read-only gates, and
+# bin/check sources environment.test itself only for the codegen/validate step.
 ifndef DEPLOYMENT_ENVIRONMENT
+ifeq (,$(filter check,$(MAKECMDGOALS)))
 $(error Please run "source environment" in the repo root directory before running make commands)
 endif
+endif
+
+.PHONY: check
+check: ## Run CI checks locally: terraform fmt + flake8 + codegen/validate + security scanners (CZID-311)
+	@./bin/check
 
 deploy: package-lambdas templates init-tf
 	#@if [[ $(DEPLOYMENT_ENVIRONMENT) == staging && $$(git symbolic-ref --short HEAD) != staging ]]; then echo Please deploy staging from the staging branch; exit 1; fi
