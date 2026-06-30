@@ -111,13 +111,6 @@ module "swipe" {
       // so that the intended machine may see it faster:
       visibility_timeout_seconds : var.DEPLOYMENT_ENVIRONMENT == "dev" ? "10" : "120",
     },
-    "nextgen-web" : {
-      dead_letter : var.DEPLOYMENT_ENVIRONMENT == "dev" ? "true" : "false",
-      // We have different settings for dev below b/c multiple dev machines may view
-      // and ignore the messages, which drives up the receiveCount. Timeout is lower
-      // so that the intended machine may see it faster:
-      visibility_timeout_seconds : var.DEPLOYMENT_ENVIRONMENT == "dev" ? "10" : "120",
-    },
   }
 
   output_status_json_files = true
