@@ -17,9 +17,13 @@ on:
 
 jobs:
   security:
-    uses: thorvath-slower/ci-workflows/.github/workflows/security.yml@v1
+    # CZID-161: pinned to the reusable BRANCH because the checkov_baseline/checkov_soft_fail inputs aren't
+    # in @v1 yet (ci-workflows#1). Repin to @v1 once that merges + v1 is re-tagged.
+    uses: thorvath-slower/ci-workflows/.github/workflows/security.yml@czid-161-checkov-baseline-gate
     with:
-      run_checkov: ${{ inputs.run_checkov || false }}
+      run_checkov: true                   # checkov is now a GATE on every run (was workflow_dispatch-only)
+      checkov_soft_fail: false            # hard-fail on findings NOT in the baseline
+      checkov_baseline: .checkov.baseline # 50 inherited findings accepted (CZID-264); gate on NEW only
       prepare: |
         source ./environment.test
         make package-lambdas
