@@ -1,0 +1,510 @@
+{
+    "failed_checks": [
+        {
+            "file": "/.github/workflows/check.yml",
+            "findings": [
+                {
+                    "resource": "on(idseq-web check)",
+                    "check_ids": [
+                        "CKV2_GHA_1"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/.github/workflows/deploy.yml",
+            "findings": [
+                {
+                    "resource": "on(CypherID Workflow Infra Deploy)",
+                    "check_ids": [
+                        "CKV_GHA_7"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/.github/workflows/plan_call.yml",
+            "findings": [
+                {
+                    "resource": "on(Plan Call)",
+                    "check_ids": [
+                        "CKV2_GHA_1"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/.github/workflows/security.yml",
+            "findings": [
+                {
+                    "resource": "on(security)",
+                    "check_ids": [
+                        "CKV2_GHA_1",
+                        "CKV_GHA_7"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/lambdas/Dockerfile",
+            "findings": [
+                {
+                    "resource": "/lambdas/Dockerfile.",
+                    "check_ids": [
+                        "CKV_DOCKER_2",
+                        "CKV_DOCKER_3"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/lambdas/taxon-indexing-concurrency-manager/Dockerfile",
+            "findings": [
+                {
+                    "resource": "/lambdas/taxon-indexing-concurrency-manager/Dockerfile.",
+                    "check_ids": [
+                        "CKV_DOCKER_2",
+                        "CKV_DOCKER_3"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/local-base-images/Dockerfile.node-base",
+            "findings": [
+                {
+                    "resource": "/local-base-images/Dockerfile.node-base.",
+                    "check_ids": [
+                        "CKV_DOCKER_2",
+                        "CKV_DOCKER_3"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/local-base-images/Dockerfile.python-base",
+            "findings": [
+                {
+                    "resource": "/local-base-images/Dockerfile.python-base.",
+                    "check_ids": [
+                        "CKV_DOCKER_2",
+                        "CKV_DOCKER_3"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/terraform/batch_vpc.tf",
+            "findings": [
+                {
+                    "resource": "module.idseq.aws_security_group.idseq",
+                    "check_ids": [
+                        "CKV_AWS_23",
+                        "CKV_AWS_382"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.aws_subnet.idseq",
+                    "check_ids": [
+                        "CKV_AWS_130"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.aws_vpc.idseq",
+                    "check_ids": [
+                        "CKV2_AWS_11",
+                        "CKV2_AWS_12"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/terraform/buckets.tf",
+            "findings": [
+                {
+                    "resource": "module.idseq.aws_s3_bucket.workflows",
+                    "check_ids": [
+                        "CKV2_AWS_62",
+                        "CKV_AWS_144",
+                        "CKV_AWS_145",
+                        "CKV_AWS_18"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.aws_s3_bucket_lifecycle_configuration.workflows",
+                    "check_ids": [
+                        "CKV_AWS_300"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/terraform/ecr.tf",
+            "findings": [
+                {
+                    "resource": "module.idseq.aws_ecr_repository.workflow-repositories[\"amr\"]",
+                    "check_ids": [
+                        "CKV_AWS_136",
+                        "CKV_AWS_51"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.aws_ecr_repository.workflow-repositories[\"benchmark\"]",
+                    "check_ids": [
+                        "CKV_AWS_136",
+                        "CKV_AWS_51"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.aws_ecr_repository.workflow-repositories[\"bulk-download\"]",
+                    "check_ids": [
+                        "CKV_AWS_136",
+                        "CKV_AWS_51"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.aws_ecr_repository.workflow-repositories[\"consensus-genome\"]",
+                    "check_ids": [
+                        "CKV_AWS_136",
+                        "CKV_AWS_51"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.aws_ecr_repository.workflow-repositories[\"diamond\"]",
+                    "check_ids": [
+                        "CKV_AWS_136",
+                        "CKV_AWS_51"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.aws_ecr_repository.workflow-repositories[\"host-genome-generation\"]",
+                    "check_ids": [
+                        "CKV_AWS_136",
+                        "CKV_AWS_51"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.aws_ecr_repository.workflow-repositories[\"index-generation\"]",
+                    "check_ids": [
+                        "CKV_AWS_136",
+                        "CKV_AWS_51"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.aws_ecr_repository.workflow-repositories[\"long-read-mngs\"]",
+                    "check_ids": [
+                        "CKV_AWS_136",
+                        "CKV_AWS_51"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.aws_ecr_repository.workflow-repositories[\"minimap2\"]",
+                    "check_ids": [
+                        "CKV_AWS_136",
+                        "CKV_AWS_51"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.aws_ecr_repository.workflow-repositories[\"phylotree-ng\"]",
+                    "check_ids": [
+                        "CKV_AWS_136",
+                        "CKV_AWS_51"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.aws_ecr_repository.workflow-repositories[\"short-read-mngs\"]",
+                    "check_ids": [
+                        "CKV_AWS_136",
+                        "CKV_AWS_51"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/terraform/index-generation.tf",
+            "findings": [
+                {
+                    "resource": "module.idseq.aws_lambda_function.start_index_generation",
+                    "check_ids": [
+                        "CKV_AWS_115",
+                        "CKV_AWS_116",
+                        "CKV_AWS_117",
+                        "CKV_AWS_173",
+                        "CKV_AWS_272",
+                        "CKV_AWS_50"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.aws_security_group.index_generation",
+                    "check_ids": [
+                        "CKV_AWS_23",
+                        "CKV_AWS_382"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/terraform/modules/cloudwatch-alerting/chalice.tf.json",
+            "findings": [
+                {
+                    "resource": "resource.custom_invocation",
+                    "check_ids": [
+                        "CKV_AWS_115",
+                        "CKV_AWS_116",
+                        "CKV_AWS_117",
+                        "CKV_AWS_173",
+                        "CKV_AWS_272",
+                        "CKV_AWS_50"
+                    ]
+                },
+                {
+                    "resource": "resource.handle_sns_message",
+                    "check_ids": [
+                        "CKV_AWS_115",
+                        "CKV_AWS_116",
+                        "CKV_AWS_117",
+                        "CKV_AWS_173",
+                        "CKV_AWS_272",
+                        "CKV_AWS_50"
+                    ]
+                },
+                {
+                    "resource": "resource.scan_logs_and_alert",
+                    "check_ids": [
+                        "CKV_AWS_115",
+                        "CKV_AWS_116",
+                        "CKV_AWS_117",
+                        "CKV_AWS_173",
+                        "CKV_AWS_272",
+                        "CKV_AWS_50"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/terraform/modules/cloudwatch-alerting/main.tf",
+            "findings": [
+                {
+                    "resource": "module.idseq.module.cloudwatch-alerting.aws_cloudwatch_log_group.new_groups",
+                    "check_ids": [
+                        "CKV_AWS_158",
+                        "CKV_AWS_338",
+                        "CKV_AWS_66"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.module.cloudwatch-alerting.aws_lambda_permission.idseq_alerting_cloudwatch",
+                    "check_ids": [
+                        "CKV_AWS_364"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.module.cloudwatch-alerting.aws_secretsmanager_secret.slack_oauth_token",
+                    "check_ids": [
+                        "CKV2_AWS_57"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.module.cloudwatch-alerting.aws_sns_topic.aws_heatmap_topic[0]",
+                    "check_ids": [
+                        "CKV_AWS_26"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/terraform/modules/pipeline-monitor-restarter/chalice.tf.json",
+            "findings": [
+                {
+                    "resource": "resource.idseq-test-restart-pipeline-monitor",
+                    "check_ids": [
+                        "CKV_AWS_115",
+                        "CKV_AWS_116",
+                        "CKV_AWS_117",
+                        "CKV_AWS_173",
+                        "CKV_AWS_272",
+                        "CKV_AWS_50"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/terraform/modules/sfn-io-helper/chalice.tf.json",
+            "findings": [
+                {
+                    "resource": "resource.handle-failure",
+                    "check_ids": [
+                        "CKV_AWS_115",
+                        "CKV_AWS_116",
+                        "CKV_AWS_117",
+                        "CKV_AWS_173",
+                        "CKV_AWS_272",
+                        "CKV_AWS_50"
+                    ]
+                },
+                {
+                    "resource": "resource.handle-success",
+                    "check_ids": [
+                        "CKV_AWS_115",
+                        "CKV_AWS_116",
+                        "CKV_AWS_117",
+                        "CKV_AWS_173",
+                        "CKV_AWS_272",
+                        "CKV_AWS_50"
+                    ]
+                },
+                {
+                    "resource": "resource.preprocess-input",
+                    "check_ids": [
+                        "CKV_AWS_115",
+                        "CKV_AWS_116",
+                        "CKV_AWS_117",
+                        "CKV_AWS_173",
+                        "CKV_AWS_272",
+                        "CKV_AWS_50"
+                    ]
+                },
+                {
+                    "resource": "resource.process-batch-event",
+                    "check_ids": [
+                        "CKV_AWS_115",
+                        "CKV_AWS_116",
+                        "CKV_AWS_117",
+                        "CKV_AWS_173",
+                        "CKV_AWS_272",
+                        "CKV_AWS_50"
+                    ]
+                },
+                {
+                    "resource": "resource.process-sfn-event",
+                    "check_ids": [
+                        "CKV_AWS_115",
+                        "CKV_AWS_116",
+                        "CKV_AWS_117",
+                        "CKV_AWS_173",
+                        "CKV_AWS_272",
+                        "CKV_AWS_50"
+                    ]
+                },
+                {
+                    "resource": "resource.process-stage-output",
+                    "check_ids": [
+                        "CKV_AWS_115",
+                        "CKV_AWS_116",
+                        "CKV_AWS_117",
+                        "CKV_AWS_173",
+                        "CKV_AWS_272",
+                        "CKV_AWS_50"
+                    ]
+                },
+                {
+                    "resource": "resource.report_metrics",
+                    "check_ids": [
+                        "CKV_AWS_115",
+                        "CKV_AWS_116",
+                        "CKV_AWS_117",
+                        "CKV_AWS_173",
+                        "CKV_AWS_272",
+                        "CKV_AWS_50"
+                    ]
+                },
+                {
+                    "resource": "resource.report_spot_interruption",
+                    "check_ids": [
+                        "CKV_AWS_115",
+                        "CKV_AWS_116",
+                        "CKV_AWS_117",
+                        "CKV_AWS_173",
+                        "CKV_AWS_272",
+                        "CKV_AWS_50"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/terraform/modules/taxon-indexing-concurrency-manager/main.tf",
+            "findings": [
+                {
+                    "resource": "module.idseq.module.taxon-indexing-concurrency-manager.aws_iam_role_policy.taxon_indexing_concurrency_manager_role",
+                    "check_ids": [
+                        "CKV_AWS_290",
+                        "CKV_AWS_355"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.module.taxon-indexing-concurrency-manager.aws_lambda_function.taxon_indexing_concurrency_manager",
+                    "check_ids": [
+                        "CKV_AWS_115",
+                        "CKV_AWS_116",
+                        "CKV_AWS_117",
+                        "CKV_AWS_173",
+                        "CKV_AWS_272",
+                        "CKV_AWS_363",
+                        "CKV_AWS_50"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/terraform/modules/taxon-indexing-eviction/chalice.tf.json",
+            "findings": [
+                {
+                    "resource": "resource.evict",
+                    "check_ids": [
+                        "CKV_AWS_115",
+                        "CKV_AWS_116",
+                        "CKV_AWS_117",
+                        "CKV_AWS_173",
+                        "CKV_AWS_272",
+                        "CKV_AWS_50"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/terraform/modules/taxon-indexing/chalice.tf.json",
+            "findings": [
+                {
+                    "resource": "resource.index_taxons",
+                    "check_ids": [
+                        "CKV_AWS_115",
+                        "CKV_AWS_116",
+                        "CKV_AWS_117",
+                        "CKV_AWS_173",
+                        "CKV_AWS_272",
+                        "CKV_AWS_50"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/terraform/swipe.tf",
+            "findings": [
+                {
+                    "resource": "module.idseq.aws_security_group.aegea-ecs-sg",
+                    "check_ids": [
+                        "CKV2_AWS_5"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.aws_ssm_parameter.sfn_notifications_queue_arn",
+                    "check_ids": [
+                        "CKV2_AWS_34"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.aws_vpc_security_group_egress_rule.aegea-ecs-allow_all_traffic_ipv4",
+                    "check_ids": [
+                        "CKV_AWS_23"
+                    ]
+                },
+                {
+                    "resource": "module.idseq.swipe",
+                    "check_ids": [
+                        "CKV_TF_1"
+                    ]
+                }
+            ]
+        }
+    ]
+}
