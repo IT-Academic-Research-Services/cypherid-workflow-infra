@@ -3,6 +3,10 @@ locals {
   # s3_bucket_workflows         = "cypherid-samples-deleteme"
   s3_bucket_workflows         = "seqtoid-workflows-${var.DEPLOYMENT_ENVIRONMENT}-${var.AWS_ACCOUNT_ID}"
   s3_bucket_public_references = "seqtoid-public-references"
+
+  # DATA-1 (CZID-31): allow terraform to destroy data resources only in throwaway envs;
+  # protect the shared/long-lived envs (staging/prod) from a silent destroy/replace data loss.
+  data_force_destroy = contains(["dev", "sandbox"], var.DEPLOYMENT_ENVIRONMENT)
 }
 
 # TODO: Create one bucket per environment? Or one bucket per version?
@@ -13,7 +17,20 @@ data "aws_s3_bucket" "public-references" {
 
 resource "aws_s3_bucket" "workflows" {
   bucket        = local.s3_bucket_workflows
-  force_destroy = true
+  force_destroy = local.data_force_destroy
+}
+
+# CZID-57 / CZID-60: encrypt the workflows bucket at rest with the customer-managed key
+# (see kms.tf) instead of the AWS-owned default. Bucket keys cut KMS request cost.
+resource "aws_s3_bucket_server_side_encryption_configuration" "workflows" {
+  bucket = aws_s3_bucket.workflows.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.workflows.arn
+    }
+    bucket_key_enabled = true
+  }
 }
 
 # Block all public access. The workflows bucket is private (the bucket policy
