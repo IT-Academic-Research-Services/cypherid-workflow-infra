@@ -38,6 +38,10 @@ data "aws_subnets" "webservice_subnets" {
 }
 
 resource "aws_security_group" "index_generation" {
+  # checkov:skip=CKV_AWS_382:Accepted-with-justification (register #56). Same rationale as
+  # aws_security_group.idseq: public-subnet Batch tier with no VPC endpoints must reach AWS service
+  # endpoints over the IGW; egress becomes scopable via the VPC endpoints architecture (CZID-352,
+  # design: VPC-ENDPOINTS-ARCHITECTURE-2026-06-29.md).
   name   = "index-generation-${var.DEPLOYMENT_ENVIRONMENT}"
   vpc_id = length(data.aws_vpc.webservice_vpc) > 0 ? data.aws_vpc.webservice_vpc[0].id : aws_vpc.idseq.id
   egress {

@@ -35,6 +35,12 @@ resource "aws_subnet" "idseq" {
 }
 
 resource "aws_security_group" "idseq" {
+  # checkov:skip=CKV_AWS_382:Accepted-with-justification (register #56). This Batch tier runs in
+  # public subnets with NO VPC endpoints, so it must reach AWS regional service endpoints (S3, ECR,
+  # CloudWatch Logs, SSM, STS) over the IGW; narrowing egress below 0.0.0.0/0 today would break
+  # image pulls / log delivery / S3 I/O on apply. The egress is made genuinely scopable by the VPC
+  # endpoints architecture (CZID-352, design: VPC-ENDPOINTS-ARCHITECTURE-2026-06-29.md), after which
+  # this rule is replaced with VPC-CIDR + gateway prefix-lists + explicit external rules.
   name   = "idseq-${var.DEPLOYMENT_ENVIRONMENT}"
   vpc_id = aws_vpc.idseq.id
   egress {
