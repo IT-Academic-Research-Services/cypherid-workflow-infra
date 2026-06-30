@@ -1,0 +1,25 @@
+name: security
+
+# Calls the shared reusable security workflow — the SSOT in thorvath-slower/ci-workflows (CZID-310).
+# One definition for all repos; this repo only keeps its own .trivyignore baseline (CZID-264) and passes
+# its codegen as `prepare` so the IaC scanners see the complete config (this repo generates config from
+# the lambda packaging step).
+on:
+  push:
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+    inputs:
+      run_checkov:
+        description: "Also run the full Checkov policy pass (full-suite / prod check)"
+        type: boolean
+        default: false
+
+jobs:
+  security:
+    uses: thorvath-slower/ci-workflows/.github/workflows/security.yml@v1
+    with:
+      run_checkov: ${{ inputs.run_checkov || false }}
+      prepare: |
+        source ./environment.test
+        make package-lambdas
