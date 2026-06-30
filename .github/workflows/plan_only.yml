@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   should-plan:
-    name: Check if OpenTofu Plan should be performed
+    name: Check if Terraform Plan should be performed
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     outputs:
@@ -60,7 +60,7 @@ jobs:
           fi
 
   plan:
-    name: Execute OpenTofu Plan
+    name: Execute Terraform Plan
     if: ${{ !cancelled() && needs.should-plan.outputs.environment }}
     needs:
       - should-plan
@@ -70,7 +70,7 @@ jobs:
     secrets: inherit
 
   plan-summary:
-    name: OpenTofu Plan Results
+    name: Terraform Plan Results
     #if: ${{ !cancelled() }} # && contains(needs.plan.result, 'success') }}
     runs-on: ubuntu-latest
     needs:

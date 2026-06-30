@@ -8,7 +8,7 @@ locals {
   # is a re-push MIGRATION (rebuild + push images under the new repo) and is gated as Bucket B.
   #
   # Greenfield envs opt in via this list; everything else stays unchanged (plan no-op, no replacement).
-  # The apply on any listed env still requires the mandatory `tofu plan`-review to confirm the repos
+  # The apply on any listed env still requires the mandatory `terraform plan`-review to confirm the repos
   # are genuinely being created (not replaced) before proceeding.
   ecr_cmk_greenfield_envs = ["prod"]
   ecr_encrypt_with_cmk    = contains(local.ecr_cmk_greenfield_envs, var.DEPLOYMENT_ENVIRONMENT)

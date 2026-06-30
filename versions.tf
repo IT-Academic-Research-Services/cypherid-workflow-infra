@@ -1,4 +1,4 @@
-# Single source of truth for the OpenTofu version floor + provider version
+# Single source of truth for the Terraform version floor + provider version
 # constraints for this repo (CZID-169). Both root modules use it: the repo-root
 # config (alongside main.tf's backend block) and the test/ localstack mock,
 # which references it via the test/versions.tf -> ../versions.tf symlink. Bump a

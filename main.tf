@@ -9,7 +9,7 @@ terraform {
   # required_version + required_providers live in versions.tf (CZID-169 SSOT).
   backend "s3" {
     region = "us-west-2"
-    # S3-native state locking (OpenTofu/TF >= 1.10): writes a <key>.tflock object
+    # S3-native state locking (Terraform/TF >= 1.10): writes a <key>.tflock object
     # alongside the state so concurrent applies can't corrupt it. No DynamoDB
     # table required. (CZID-29 / STATE-1.)
     use_lockfile = true
