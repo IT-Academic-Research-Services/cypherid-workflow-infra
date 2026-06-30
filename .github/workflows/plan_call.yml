@@ -9,7 +9,7 @@ on:
         required: true
     outputs:
       plan-artifact-id:
-        description: The Artifact ID of the generated OpenTofu Plan
+        description: The Artifact ID of the generated Terraform Plan
         value: ${{ jobs.plan.outputs.plan-artifact-id }}
       result-artifact-id:
         description: The Artifact ID of the Result JSON
@@ -62,13 +62,16 @@ jobs:
           #role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
           aws-profile: idseq-${{ inputs.environment }}
-      - name: Setup OpenTofu
-        uses: opentofu/setup-opentofu@v2
+      - name: Read Terraform version (SSOT = .terraform-version)
+        id: tfver
+        run: echo "version=$(cat .terraform-version)" >> "$GITHUB_OUTPUT"
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
-          tofu_version_file: .opentofu-version
-          tofu_wrapper: false
-      - name: Setup OpenTofu Environment
-        # We manually create aws_config.json instead of using the 'init-tf' Makefile target, as that target also calls 'tofu init' without the '-upgrade' flag, which we need
+          terraform_version: ${{ steps.tfver.outputs.version }}
+          terraform_wrapper: false
+      - name: Setup Terraform Environment
+        # We manually create aws_config.json instead of using the 'init-tf' Makefile target, as that target also calls 'terraform init' without the '-upgrade' flag, which we need
         run: |
           set -x
           source "environment.${{ inputs.environment }}"
@@ -80,26 +83,26 @@ jobs:
       - name: Package Lambdas and create Templates
         run: |
           make package-lambdas templates
-      - name: OpenTofu Plan
+      - name: Terraform Plan
         run: |
           # No -upgrade: provider versions are pinned by the committed
           # .terraform.lock.hcl so plans are reproducible and a malicious/broken
           # provider release can't slip in between runs (CZID-30 / STATE-2).
-          tofu init -input=false
+          terraform init -input=false
           echo "Plan will be created in: ${{ github.workspace }}/tf.plan"
           set +e
-          tofu plan -input=false -detailed-exitcode -refresh=false -out="${{ github.workspace }}/tf.plan"
+          terraform plan -input=false -detailed-exitcode -refresh=false -out="${{ github.workspace }}/tf.plan"
           exitcode=$?
-          echo "OpenTofu exited with exit-code $exitcode"
+          echo "Terraform exited with exit-code $exitcode"
           if [[ $exitcode -eq 1 ]]; then
             exit $exitcode
           fi
           set -e
-          tofu show -json "${{ github.workspace }}/tf.plan" > plan.json
+          terraform show -json "${{ github.workspace }}/tf.plan" > plan.json
           jq '.resource_changes[] | select(.change.actions[0] != "no-op" and .change.actions[0] != "read")' plan.json | jq '{address, action: .change.actions[0]}' | jq -c --slurp . > "${{ github.workspace }}/resource_changes.json"
           jq -c . "${{ github.workspace }}/resource_changes.json"
       # TODO: Only uncomment for local execution via nektos act, when testing outputs and artifacts
-      #- name: OpenTofu Plan
+      #- name: Terraform Plan
       #  run: |
       #    echo foo > "${{ github.workspace }}/tf.plan"
       #    jq -cn '$ARGS.positional' --jsonargs '{"address": "foo", "action": "create"}' '{"address": "bar", "action": "update"}' '{"address": "baz", "action": "delete"}' > "${{ github.workspace }}/resource_changes.json"

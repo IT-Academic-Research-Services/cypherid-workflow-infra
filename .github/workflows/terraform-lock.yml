@@ -1,0 +1,65 @@
+name: terraform-lock
+
+# Generates/refreshes the committed .terraform.lock.hcl on a linux/amd64 runner and
+# commits it back to the branch. This exists because:
+#   - the lockfile CANNOT be generated on Apple Silicon — the vendored swipe module's
+#     hashicorp/template provider publishes no darwin_arm64 build (the same reason
+#     `validate` is ubuntu-only); and
+#   - the `Terraform Validate` workflow only GATES on the lockfile (fails if it's
+#     missing or drifted) — it does not create or commit it.
+# Run on demand whenever provider constraints change; the validate gate then enforces
+# the committed lockfile stays current. (The lambda codegen below — chalice.tf.json —
+# is a transient build artifact, NOT committed; `terraform init` just needs it present.)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: terraform-lock
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  relock:
+    name: regenerate + commit lockfile
+    runs-on: ubuntu-latest
+    steps:
+      - name: Git clone the repository
+        uses: actions/checkout@v6
+      - name: Reconfigure Git to use HTTP authentication
+        run: git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+      - name: Read Terraform version (SSOT = .terraform-version)
+        id: tfver
+        run: echo "version=$(cat .terraform-version)" >> "$GITHUB_OUTPUT"
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ steps.tfver.outputs.version }}
+          terraform_wrapper: false
+      - name: Package Lambdas (codegen prerequisite for init)
+        run: |
+          source ./environment.test
+          make package-lambdas
+      - name: Install modules + regenerate cross-platform lockfile
+        run: |
+          source ./environment.test
+          # Clear the backend-config args meant for real applies.
+          unset TF_CLI_ARGS_init TF_CLI_ARGS_output
+          terraform init -backend=false -input=false
+          terraform providers lock -platform=linux_amd64 -platform=darwin_amd64
+      - name: Commit the lockfile if it changed
+        run: |
+          if git diff --quiet -- .terraform.lock.hcl; then
+            echo "lockfile already current — nothing to commit"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add .terraform.lock.hcl
+            git commit -m "chore: refresh .terraform.lock.hcl (terraform providers lock)"
+            git push
+          fi
