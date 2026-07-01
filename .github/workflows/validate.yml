@@ -1,32 +1,16 @@
 name: Terraform Validate
 
-# fmt + validate gate. Runs on ubuntu-latest (linux/amd64) — required: the
-# vendored swipe module uses the deprecated hashicorp/template provider, which
-# publishes no darwin_arm64 build, so this cannot run on Apple-Silicon self-hosted
-# runners. terraform validate needs the chalice lambda modules, so we run the same
-# `make package-lambdas` codegen the plan workflow uses before init/validate.
-# (Converted from OpenTofu to native Terraform per customer req.)
-
+# Thin caller of the SSOT reusable (thorvath-slower/seqtoid-ci-workflows) pinned @v1 — one definition,
+# updated once, used everywhere. This repo needs chalice lambda codegen + env sourcing before validate,
+# expressed via `prepare` + `validate_command`. Terraform version comes from .terraform-version.
 on:
-  push:
-    branches:
-      - development
-      - staging
-      - main
-      - 'releases/**'
   pull_request:
-    branches:
-      - development
-      - staging
-      - main
-      - 'releases/**'
+  push:
+    branches: [main, integration, development, staging, 'releases/**']
   workflow_dispatch:
 
 permissions:
   contents: read
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
@@ -34,51 +18,11 @@ concurrency:
 
 jobs:
   validate:
-    name: terraform fmt + validate
-    runs-on: ubuntu-latest
-    steps:
-      - name: Git clone the repository
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - name: Reconfigure Git to use HTTP authentication
-        # The swipe module source is github.com/...; CI runners have no SSH key.
-        run: git config --global url."https://github.com/".insteadOf ssh://git@github.com/
-      - name: Read Terraform version (SSOT = .terraform-version)
-        id: tfver
-        run: echo "version=$(cat .terraform-version)" >> "$GITHUB_OUTPUT"
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ steps.tfver.outputs.version }}
-          terraform_wrapper: false
-      - name: terraform fmt -check
-        # Check committed config only — run before codegen so generated
-        # files (variables.tf, chalice.tf.json) are not formatting-gated.
-        run: terraform fmt -check -recursive
-      - name: Package Lambdas (codegen prerequisite for validate)
-        run: |
-          source ./environment.test
-          make package-lambdas
-      - name: terraform init + validate
-        run: |
-          source ./environment.test
-          # environment.test exports TF_CLI_ARGS_init (--backend-config) for real
-          # applies; clear it so `terraform init -backend=false` doesn't conflict.
-          unset TF_CLI_ARGS_init TF_CLI_ARGS_output
-          terraform init -backend=false -input=false
-          terraform validate
-      - name: Verify provider lockfile is committed and current
-        # `terraform init` above updates .terraform.lock.hcl in place if a provider
-        # constraint changed without re-locking (or creates it if missing). Fail
-        # the build on any drift so provider versions stay pinned + reproducible
-        # and a malicious/broken provider release can't slip in.
-        run: |
-          if [ ! -f .terraform.lock.hcl ]; then
-            echo "::error::.terraform.lock.hcl is missing — run 'terraform providers lock -platform=linux_amd64 -platform=darwin_amd64' and commit it."
-            exit 1
-          fi
-          if ! git diff --exit-code -- .terraform.lock.hcl; then
-            echo "::error::.terraform.lock.hcl drifted during init — re-run 'terraform providers lock' and commit the result."
-            exit 1
-          fi
+    uses: thorvath-slower/seqtoid-ci-workflows/.github/workflows/terraform-ci.yml@v1
+    with:
+      fmt_path: "."
+      # codegen (runs after fmt, before validate) — chalice lambda packaging + test env
+      prepare: "source ./environment.test && make package-lambdas"
+      # root-stack init+validate with env sourcing; clear the apply-only TF_CLI_ARGS so -backend=false wins
+      validate_command: "source ./environment.test && unset TF_CLI_ARGS_init TF_CLI_ARGS_output && terraform init -backend=false -input=false && terraform validate"
+      check_lockfile: true
