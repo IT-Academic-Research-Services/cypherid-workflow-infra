@@ -38,7 +38,7 @@ nothing will remind you — so this list is how we avoid silently drifting.
 | B1 | Terraform CLI version (SSOT) | `.terraform-version` → `1.12.1`; consumed by `validate.yml`/`plan_call.yml` via `terraform_version` | Renovate custom regex manager (`renovate.json`, `depName hashicorp/terraform`, github-releases) |
 | B2 | AWS provider version constraint (SSOT) | `versions.tf` → `required_providers { aws = { version = "~> 4.54" } }`; symlinked `test/versions.tf` | Renovate `terraform` manager (grouped "terraform providers"); lockfile re-locked & CI-gated |
 | B3 | External `?ref=`-pinned module — swipe | `terraform/swipe.tf` line 2 → `source = "github.com/chanzuckerberg/swipe?ref=v1.4.9"` | Renovate `terraform` manager (grouped "terraform providers") |
-| B4 | GitHub Actions `uses:` pins | `.github/workflows/*.yml` (`actions/checkout@v6`, `actions/cache@v5`, `setup-python@v6`, `hashicorp/setup-terraform@v2`, `aws-actions/configure-aws-credentials@v6.1.0`, `thorvath-slower/seqtoid-ci-workflows/flake8-action@v1.1`, …) | Renovate `github-actions` manager (grouped "github actions") |
+| B4 | GitHub Actions `uses:` pins | `.github/workflows/*.yml` (`actions/checkout@v6`, `actions/cache@v5`, `setup-python@v6`, `hashicorp/setup-terraform@v2`, `aws-actions/configure-aws-credentials@v6.1.0`, `thorvath-slower/seqtoid-ci-workflows/flake8-action@v1`, …) | Renovate `github-actions` manager (grouped "github actions") |
 | B5 | Lambda base-image digests | the four Dockerfiles in A9 | Renovate `dockerfile` manager (grouped "docker base images") with `pinDigests:true` — once the app is live (currently unpinned, see A9) |
 | B6 | pip deps | `requirements-dev.txt`; `lambdas/*/requirements.txt` (cloudwatch-alerting, pipeline-monitor-restarter, sfn-io-helper, taxon-indexing, taxon-indexing-eviction) | Renovate `pip_requirements` manager (grouped "pip deps") |
 | B7 | npm deps | `lambdas/taxon-indexing-concurrency-manager/package.json` + `package-lock.json` | Renovate `npm` manager (grouped "npm deps") |
@@ -49,5 +49,5 @@ nothing will remind you — so this list is how we avoid silently drifting.
 Add a new module, backend wiring, hardcoded account/ARN, provider, base image, Action,
 or requirements file → add a row here in the same shape. If a human has to remember to
 bump it, it belongs in **table A**; if Renovate (or an SSOT version file) covers it, put
-it in **table B** with the manager named. The `thorvath-slower/seqtoid-ci-workflows/flake8-action@v1.1` ref is a
+it in **table B** with the manager named. The `thorvath-slower/seqtoid-ci-workflows/flake8-action@v1` ref is a
 moving tag, not a SHA — its content is rolled out by moving the tag in that repo (CZID-204).
