@@ -15,6 +15,7 @@ locals {
 }
 
 resource "aws_ecr_repository" "workflow-repositories" {
+  #checkov:skip=CKV_AWS_136:KMS-at-rest IS supported (encryption_configuration below, keyed to the workflows CMK) but is enabled per-env via local.ecr_encrypt_with_cmk — the ECR encryption attribute is immutable, so it can only be set on greenfield envs without destroying existing AES256 repos. Non-greenfield (incl. the test env checkov scans) intentionally omits it.
   for_each             = toset(local.ecr_repository_names)
   name                 = each.key
   image_tag_mutability = "MUTABLE"
