@@ -5,8 +5,8 @@
 exact file path and in-file location of each. If it's in the "human-maintained" table,
 nothing will remind you — so this list is how we avoid silently drifting.
 
-> ⚠️ **Renovate is configured (`renovate.json`) but the GitHub app is not enabled yet
-> (CZID-212).** Until it is, *everything* below is effectively human-maintained. The
+> ⚠️ **Renovate is configured (`renovate.json`) but the GitHub app is not enabled
+> yet.** Until it is, *everything* below is effectively human-maintained. The
 > "Automated" table describes the intended steady state once the app is on.
 
 > ℹ️ **Layout note.** This is a single flat root Terraform module (not a multi-stack
@@ -50,4 +50,4 @@ Add a new module, backend wiring, hardcoded account/ARN, provider, base image, A
 or requirements file → add a row here in the same shape. If a human has to remember to
 bump it, it belongs in **table A**; if Renovate (or an SSOT version file) covers it, put
 it in **table B** with the manager named. The `thorvath-slower/flake8-action@v2` ref is a
-moving tag, not a SHA — its content is rolled out by moving the tag in that repo (CZID-204).
+moving tag, not a SHA — its content is rolled out by moving the tag in that repo.
