@@ -76,6 +76,28 @@ resource "aws_s3_bucket_lifecycle_configuration" "workflows" {
 #   acl    = "private"
 # }
 
+# CZID-362 (#362 / WBS 20033): optional cross-account read delegation for the
+# per-account WDL workflows bucket. Empty by default (= current behavior: the
+# bucket grants read only to its OWN account root). This replaces the old
+# hardcoded/stale CZI account IDs (732052188396 / 941377154785 / etc.) that were
+# commented out below — supply the specific reader ARNs per env instead.
+#
+# D5 (each env self-sufficient in its own account): a delegation is only needed
+# if a DIFFERENT account must read this account's workflow outputs (e.g. a
+# central taxon-indexing / benchmarking account). Keep it least-privilege: pass
+# the specific account-root or role ARNs that actually need read, nothing wider.
+#
+# NOTE: this does NOT touch the shared seqtoid-public-references (taxon) bucket —
+# that bucket is a data source here (manually created, not TF-owned), so its
+# policy cannot be managed from this stack without importing it (a risky change
+# on a live shared bucket the pipeline reads — tracked as the Bucket B apply,
+# out of scope for this authoring).
+variable "WORKFLOWS_BUCKET_DELEGATED_READ_ARNS" {
+  description = "Extra IAM principal ARNs (e.g. arn:aws:iam::<account>:root) granted cross-account read on the per-account workflows bucket. Empty by default (own-account read only). Least-privilege: list only the specific principals that must read this account's workflow outputs."
+  type        = list(string)
+  default     = []
+}
+
 data "aws_iam_policy_document" "workflows-bucket" {
   statement {
     sid = "ReadAccess"
@@ -94,6 +116,28 @@ data "aws_iam_policy_document" "workflows-bucket" {
       # identifiers = ["*"]
     }
     effect = "Allow"
+  }
+
+  # CZID-362: cross-account read delegation, gated on a non-empty ARN list so the
+  # default (empty) produces byte-identical policy JSON to before — no drift.
+  dynamic "statement" {
+    for_each = length(var.WORKFLOWS_BUCKET_DELEGATED_READ_ARNS) > 0 ? [1] : []
+    content {
+      sid = "CrossAccountReadAccess"
+      actions = [
+        "s3:ListBucket*",
+        "s3:GetObject*"
+      ]
+      resources = [
+        aws_s3_bucket.workflows.arn,
+        "${aws_s3_bucket.workflows.arn}/*"
+      ]
+      principals {
+        type        = "AWS"
+        identifiers = var.WORKFLOWS_BUCKET_DELEGATED_READ_ARNS
+      }
+      effect = "Allow"
+    }
   }
 }
 
