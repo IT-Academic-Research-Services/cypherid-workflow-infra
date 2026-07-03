@@ -17,7 +17,8 @@ module "sfn-io-helper" {
 }
 
 module "taxon-indexing" {
-  source = "./modules/taxon-indexing"
+  source                 = "./modules/taxon-indexing"
+  deployment_environment = var.DEPLOYMENT_ENVIRONMENT
 }
 
 module "taxon-indexing-concurrency-manager" {
