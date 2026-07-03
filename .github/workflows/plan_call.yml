@@ -123,7 +123,7 @@ jobs:
             --arg artifact_name "plan" \
             --arg artifact_id "${{ steps.upload-plan.outputs.artifact-id }}" \
             --argjson change_count "$change_count" \
-            --argjson resource_changes $(<"${{ github.workspace }}/resource_changes.json") \
+            --argjson resource_changes "$(<"${{ github.workspace }}/resource_changes.json")" \
             '$ARGS.named' > "${{ github.workspace }}/result.json"
           jq . "${{ github.workspace }}/result.json"
       - name: Upload Result JSON as Artifact
