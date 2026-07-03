@@ -44,13 +44,56 @@
       ]
     },
     {
+      "Sid": "BatchEventsStatesReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "batch:Describe*",
+        "batch:List*",
+        "batch:RegisterJobDefinition",
+        "batch:CreateComputeEnvironment",
+        "batch:CreateJobQueue",
+        "batch:CreateSchedulingPolicy",
+        "events:Describe*",
+        "events:List*",
+        "events:TestEventPattern",
+        "states:Describe*",
+        "states:List*",
+        "states:CreateStateMachine",
+        "states:CreateActivity",
+        "states:ValidateStateMachineDefinition"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "BatchEventsStatesScoped",
       "Effect": "Allow",
       "Action": [
         "batch:*",
         "events:*",
         "states:*"
       ],
-      "Resource": "*"
+      "Resource": [
+        "arn:aws:batch:*:${AWS_ACCOUNT_ID}:*/idseq-dev-*",
+        "arn:aws:batch:*:${AWS_ACCOUNT_ID}:*/idseq-staging-*",
+        "arn:aws:batch:*:${AWS_ACCOUNT_ID}:*/idseq-${DEPLOYMENT_ENVIRONMENT}-*",
+        "arn:aws:batch:*:${AWS_ACCOUNT_ID}:*/idseq-swipe-*",
+        "arn:aws:events:*:${AWS_ACCOUNT_ID}:rule/idseq-dev-*",
+        "arn:aws:events:*:${AWS_ACCOUNT_ID}:rule/idseq-staging-*",
+        "arn:aws:events:*:${AWS_ACCOUNT_ID}:rule/idseq-${DEPLOYMENT_ENVIRONMENT}-*",
+        "arn:aws:events:*:${AWS_ACCOUNT_ID}:rule/idseq-swipe-*",
+        "arn:aws:states:*:${AWS_ACCOUNT_ID}:stateMachine:idseq-dev-*",
+        "arn:aws:states:*:${AWS_ACCOUNT_ID}:stateMachine:idseq-staging-*",
+        "arn:aws:states:*:${AWS_ACCOUNT_ID}:stateMachine:idseq-${DEPLOYMENT_ENVIRONMENT}-*",
+        "arn:aws:states:*:${AWS_ACCOUNT_ID}:stateMachine:idseq-swipe-*",
+        "arn:aws:states:*:${AWS_ACCOUNT_ID}:activity:idseq-dev-*",
+        "arn:aws:states:*:${AWS_ACCOUNT_ID}:activity:idseq-staging-*",
+        "arn:aws:states:*:${AWS_ACCOUNT_ID}:activity:idseq-${DEPLOYMENT_ENVIRONMENT}-*",
+        "arn:aws:states:*:${AWS_ACCOUNT_ID}:activity:idseq-swipe-*",
+        "arn:aws:states:*:${AWS_ACCOUNT_ID}:execution:idseq-dev-*:*",
+        "arn:aws:states:*:${AWS_ACCOUNT_ID}:execution:idseq-staging-*:*",
+        "arn:aws:states:*:${AWS_ACCOUNT_ID}:execution:idseq-${DEPLOYMENT_ENVIRONMENT}-*:*",
+        "arn:aws:states:*:${AWS_ACCOUNT_ID}:execution:idseq-swipe-*:*"
+      ]
     },
     {
       "Effect": "Allow",
@@ -61,7 +104,16 @@
     },
     {
       "Effect": "Allow",
-      "Action": "secretsmanager:*",
+      "Action": [
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetResourcePolicy",
+        "secretsmanager:ListSecretVersionIds",
+        "secretsmanager:CreateSecret",
+        "secretsmanager:DeleteSecret",
+        "secretsmanager:TagResource",
+        "secretsmanager:UntagResource"
+      ],
       "Resource": [
         "arn:aws:secretsmanager:*:${AWS_ACCOUNT_ID}:secret:idseq/*"
       ]
@@ -197,9 +249,35 @@
       "Resource": "*"
     },
     {
+      "Sid": "ScopedMetricsAndLogs",
       "Effect": "Allow",
       "Action": [
-          "cloudwatch:PutMetricData"
+        "cloudwatch:PutMetricData",
+        "cloudwatch:GetMetricData",
+        "cloudwatch:GetMetricStatistics",
+        "cloudwatch:ListMetrics",
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:PutMetricAlarm",
+        "cloudwatch:DeleteAlarms",
+        "cloudwatch:ListTagsForResource",
+        "cloudwatch:TagResource",
+        "cloudwatch:UntagResource",
+        "cloudwatch:GetDashboard",
+        "cloudwatch:ListDashboards",
+        "cloudwatch:PutDashboard",
+        "cloudwatch:DeleteDashboards",
+        "logs:DescribeLogGroups",
+        "logs:DescribeLogStreams",
+        "logs:DescribeSubscriptionFilters",
+        "logs:ListTagsForResource",
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+        "logs:PutRetentionPolicy",
+        "logs:PutSubscriptionFilter",
+        "logs:DeleteSubscriptionFilter",
+        "logs:TagResource",
+        "logs:UntagResource"
       ],
       "Resource": "*"
     },

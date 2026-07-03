@@ -31,9 +31,13 @@
 #   policy_arn = "arn:aws:iam::aws:policy/AWSLambda_ReadOnlyAccess"
 # }
 
+# CZID-28: the managed CloudWatchFullAccess attachment was dropped. Its metrics + logs
+# permissions are now provided, scoped, by the "ScopedMetricsAndLogs" statement in the
+# inline idseq_ci_cd policy (iam_policy_templates/ci_cd.json) — an enumerated create/write/
+# tag action set instead of cloudwatch:* + logs:*. Do NOT re-add the FullAccess attachment.
 # resource "aws_iam_role_policy_attachment" "idseq_ci_cd_cloudwatch" {
 #   role       = aws_iam_role.idseq_ci_cd_role.name
-#   policy_arn = "arn:aws:iam::aws:policy/CloudWatchFullAccess"
+#   policy_arn = "arn:aws:iam::aws:policy/CloudWatchFullAccess"  # REMOVED — see ScopedMetricsAndLogs in ci_cd.json
 # }
 
 # resource "aws_iam_instance_profile" "idseq_ci_cd" {
