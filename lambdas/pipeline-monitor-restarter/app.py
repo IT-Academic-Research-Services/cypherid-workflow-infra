@@ -2,6 +2,13 @@ import os
 import logging
 import boto3
 from chalice import Chalice, Rate
+from chalicelib.sentry_init import init_sentry
+
+# Wire Sentry so unhandled Lambda errors reach the same Sentry project as the
+# Rails backend instead of dying silently in CloudWatch. Guarded so chalice
+# codegen/CLI mode does not init.
+if "AWS_CHALICE_CLI_MODE" not in os.environ:
+    init_sentry()
 
 app = Chalice(app_name="idseq-pipeline-monitor-restarter")
 app.log.setLevel(logging.INFO)

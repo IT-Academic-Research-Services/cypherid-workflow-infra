@@ -2,6 +2,7 @@
 
 import logging
 from chalicelib.config import get_reportable_parameters, get_parameters
+from chalicelib.sentry_init import capture_exception
 from typing import Dict, List, Any
 
 logger = logging.getLogger()
@@ -140,5 +141,10 @@ def deliver_final_report():
     _final_report["params"] = get_reportable_parameters()
     if _final_report["errors"] or _final_report["warnings"]:
         logger.error
-        raise Exception(f"TaxonIndexEvictionError: {_final_report}")
+        exc = Exception(f"TaxonIndexEvictionError: {_final_report}")
+        # Surface eviction failures to Sentry explicitly (they are only otherwise
+        # logged/raised); AwsLambdaIntegration also captures at the handler
+        # boundary, but capturing here attaches the final report as context.
+        capture_exception(exc)
+        raise exc
     return _final_report
