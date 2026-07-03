@@ -38,16 +38,41 @@ data "aws_subnets" "webservice_subnets" {
 }
 
 resource "aws_security_group" "index_generation" {
-  # checkov:skip=CKV_AWS_382:Accepted-with-justification (register #56). Same rationale as
-  # aws_security_group.idseq: public-subnet Batch tier with no VPC endpoints must reach AWS service
-  # endpoints over the IGW; egress becomes scopable via the VPC endpoints architecture (CZID-352,
-  # design: VPC-ENDPOINTS-ARCHITECTURE-2026-06-29.md).
+  # CZID-56: same rationale as aws_security_group.idseq — public-subnet Batch tier with no VPC
+  # endpoints must reach AWS service endpoints AND download reference data (NCBI etc.) from arbitrary
+  # public hosts over the IGW, all over HTTP/HTTPS. Destination stays 0.0.0.0/0 (arbitrary reference
+  # sources) until the VPC endpoints architecture lands (CZID-352, design:
+  # VPC-ENDPOINTS-ARCHITECTURE-2026-06-29.md). Egress is narrowed off "-1"/all-ports to HTTPS + HTTP
+  # + DNS, which removes arbitrary-port outbound and clears CKV_AWS_382; Trivy AWS-0104 (0.0.0.0/0
+  # destination) is kept + baselined in .trivyignore with this justification.
   name   = "index-generation-${var.DEPLOYMENT_ENVIRONMENT}"
   vpc_id = length(data.aws_vpc.webservice_vpc) > 0 ? data.aws_vpc.webservice_vpc[0].id : aws_vpc.idseq.id
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    description = "HTTPS to AWS endpoints / reference data sources"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  egress {
+    description = "HTTP for reference data / mirror pulls"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  egress {
+    description = "DNS (UDP)"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  egress {
+    description = "DNS (TCP)"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 }

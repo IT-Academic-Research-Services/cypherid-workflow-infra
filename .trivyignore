@@ -4,7 +4,11 @@
 
 # --- IaC misconfigs (short trivy misconfig IDs, matching czid-infra's .trivyignore) ---
 #   AWS-0031 ECR mutable tags | 0089 S3 access logging | 0095 SNS unencrypted | 0096 SQS unencrypted
-#   AWS-0104 SG unrestricted egress (CRITICAL — review) | 0130 IMDS token | 0132 bucket CMK
+#   AWS-0104 SG egress to 0.0.0.0/0 (CRITICAL). CZID-56: partially remediated — egress narrowed off
+#     all-protocol/all-port to HTTPS+HTTP+DNS only (clears Checkov CKV_AWS_382 + removes the
+#     arbitrary-port C2/exfil path). The 0.0.0.0/0 *destination* is retained (public-subnet Batch/ECS
+#     tiers must reach arbitrary AWS/NCBI endpoints with no VPC endpoints yet) so AWS-0104 still fires;
+#     kept baselined until the VPC endpoints architecture lands (CZID-352). | 0130 IMDS token | 0132 bucket CMK
 #   DS-0002 no non-root USER | DS-0015 yum clean | DS-0029 --no-install-recommends
 AWS-0031
 AWS-0089
