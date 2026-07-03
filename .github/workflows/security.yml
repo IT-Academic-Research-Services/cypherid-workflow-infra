@@ -1,6 +1,6 @@
 name: security
 
-# Calls the shared reusable security workflow — the SSOT in thorvath-slower/ci-workflows (CZID-310).
+# Calls the shared reusable security workflow — the SSOT in thorvath-slower/seqtoid-ci-workflows (CZID-310).
 # One definition for all repos; this repo only keeps its own .trivyignore baseline (CZID-264) and passes
 # its codegen as `prepare` so the IaC scanners see the complete config (this repo generates config from
 # the lambda packaging step).
@@ -17,9 +17,10 @@ on:
 
 jobs:
   security:
-    # CZID-161: pinned to the reusable BRANCH because the checkov_baseline/checkov_soft_fail inputs aren't
-    # in @v1 yet (ci-workflows#1). Repin to @v1 once that merges + v1 is re-tagged.
-    uses: thorvath-slower/ci-workflows/.github/workflows/security.yml@czid-161-checkov-baseline-gate
+    # CZID-433 (F5b): repointed off the archived ci-workflows predecessor's mutable branch ref to the
+    # current SSOT tag. The checkov_baseline/checkov_soft_fail inputs were ported into v1 (CZID-416), so
+    # the @v1 reusable interface now accepts everything this caller passes.
+    uses: thorvath-slower/seqtoid-ci-workflows/.github/workflows/security.yml@v1
     with:
       run_checkov: true                   # checkov is now a GATE on every run (was workflow_dispatch-only)
       checkov_soft_fail: false            # hard-fail on findings NOT in the baseline
