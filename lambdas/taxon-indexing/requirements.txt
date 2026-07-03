@@ -4,3 +4,4 @@ boto3~=1.35.0
 chalice~=1.33.0 
 opensearch-py~=2.6.0
 fastjsonschema~=2.21.2
+sentry-sdk~=2.64.0
