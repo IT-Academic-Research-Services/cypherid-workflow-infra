@@ -26,7 +26,7 @@ else
         AWS_ACCOUNT_ID=$(aws sts get-caller-identity | jq -r .Account)
         TFSTATE_FILE="${TF_DATA_DIR}/remote.tfstate"
 
-        EXPECT_ALIAS=${EXPECT_AWS_ACCOUNT_ALIAS:-cypherid-dev}
+        EXPECT_ALIAS=${EXPECT_AWS_ACCOUNT_ALIAS:-seqtoid-dev}
         AWS_ACCOUNT_ALIAS=$(aws iam list-account-aliases | jq -r '.AccountAliases[0]')
         if [[ $AWS_ACCOUNT_ALIAS != $EXPECT_ALIAS ]]; then
             echo "ERROR: Expected to be in AWS account $EXPECT_ALIAS, but got $AWS_ACCOUNT_ALIAS" 1>&2
