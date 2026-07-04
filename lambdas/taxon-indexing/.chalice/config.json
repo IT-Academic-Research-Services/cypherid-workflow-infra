@@ -5,6 +5,43 @@
   "automatic_layer": false,
   "lambda_memory_size": 512,
   "lambda_timeout": 900,
-  "stages": {},
+  "stages": {
+    "dev": {
+      "subnet_ids": [
+        "${local.taxon_indexing_subnet_ids[0]}",
+        "${local.taxon_indexing_subnet_ids[1]}"
+      ],
+      "security_group_ids": [
+        "${aws_security_group.taxon_indexing[0].id}"
+      ]
+    },
+    "staging": {
+      "subnet_ids": [
+        "${local.taxon_indexing_subnet_ids[0]}",
+        "${local.taxon_indexing_subnet_ids[1]}"
+      ],
+      "security_group_ids": [
+        "${aws_security_group.taxon_indexing[0].id}"
+      ]
+    },
+    "prod": {
+      "subnet_ids": [
+        "${local.taxon_indexing_subnet_ids[0]}",
+        "${local.taxon_indexing_subnet_ids[1]}"
+      ],
+      "security_group_ids": [
+        "${aws_security_group.taxon_indexing[0].id}"
+      ]
+    },
+    "sandbox": {
+      "subnet_ids": [
+        "${local.taxon_indexing_subnet_ids[0]}",
+        "${local.taxon_indexing_subnet_ids[1]}"
+      ],
+      "security_group_ids": [
+        "${aws_security_group.taxon_indexing[0].id}"
+      ]
+    }
+  },
   "environment_variables": {}
 }

@@ -37,7 +37,7 @@ jobs:
         run: |
           git config --global url."https://github.com/".insteadOf ssh://git@github.com/
       - name: Install AWS CLI
-        uses: unfor19/install-aws-cli-action@v1
+        uses: unfor19/install-aws-cli-action@f5b46b7f32cf5e7ebd652656c5036bf83dd1e60c # v1
         with:
           version: 2
           verbose: false
@@ -123,7 +123,7 @@ jobs:
             --arg artifact_name "plan" \
             --arg artifact_id "${{ steps.upload-plan.outputs.artifact-id }}" \
             --argjson change_count "$change_count" \
-            --argjson resource_changes $(<"${{ github.workspace }}/resource_changes.json") \
+            --argjson resource_changes "$(<"${{ github.workspace }}/resource_changes.json")" \
             '$ARGS.named' > "${{ github.workspace }}/result.json"
           jq . "${{ github.workspace }}/result.json"
       - name: Upload Result JSON as Artifact

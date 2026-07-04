@@ -8,6 +8,7 @@ import pymysql
 from datetime import datetime
 from opensearchpy import OpenSearch
 from chalicelib import queries, config, schemas
+from chalicelib.sentry_init import init_sentry, capture_exception
 from aws_lambda_powertools.utilities.validation import validate
 
 app = Chalice(app_name="taxon-indexing-lambda")
@@ -18,6 +19,10 @@ logger.setLevel(logging.INFO)
 DEFAULT_ES_BATCHSIZE = 1000
 
 if "AWS_CHALICE_CLI_MODE" not in os.environ:
+    # Wire Sentry so unhandled Lambda errors (e.g. the heatmap ES timeout) reach
+    # the same Sentry project as the Rails backend instead of dying silently in
+    # CloudWatch.
+    init_sentry()
     params = config.get_parameters()
     es = OpenSearch(params["es_host"], timeout=120)
 
@@ -86,7 +91,13 @@ def index_taxons(event, context):
             bulk_index_taxon_metrics(batch)
 
     # refresh the index so that all written records are available to search before returning
-    response = es.indices.refresh(index=scored_taxon_counts_index_name)
+    try:
+        response = es.indices.refresh(index=scored_taxon_counts_index_name)
+    except Exception as exc:
+        # The heatmap ES timeout used to die silently in CloudWatch; make it
+        # visible in Sentry, then re-raise so the Lambda still fails.
+        capture_exception(exc)
+        raise
     logger.info(response)
     complete_pipeline_run(pipeline_run_id, background_id, pipeline_runs_index_name)
 
@@ -220,10 +231,15 @@ def bulk_index_taxon_metrics(batch):
             ]
             error_count = len(errors)
             logger.info(response)
-            raise Exception(
+            exc = Exception(
                 f"Bulk write failed {error_count} times. Error example: ",
                 json.dumps(errors[0]),
             )
+            # Surface this operational failure to Sentry explicitly (it is only
+            # otherwise logged/raised); AwsLambdaIntegration also captures it at
+            # the handler boundary, but capturing here attaches the ES error.
+            capture_exception(exc)
+            raise exc
         logger.info(response)
 
 

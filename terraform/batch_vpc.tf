@@ -35,18 +35,45 @@ resource "aws_subnet" "idseq" {
 }
 
 resource "aws_security_group" "idseq" {
-  # checkov:skip=CKV_AWS_382:Accepted-with-justification (register #56). This Batch tier runs in
-  # public subnets with NO VPC endpoints, so it must reach AWS regional service endpoints (S3, ECR,
-  # CloudWatch Logs, SSM, STS) over the IGW; narrowing egress below 0.0.0.0/0 today would break
-  # image pulls / log delivery / S3 I/O on apply. The egress is made genuinely scopable by the VPC
-  # endpoints architecture (CZID-352, design: VPC-ENDPOINTS-ARCHITECTURE-2026-06-29.md), after which
-  # this rule is replaced with VPC-CIDR + gateway prefix-lists + explicit external rules.
+  # CZID-56: this Batch tier runs in public subnets with NO VPC endpoints, so it must reach AWS
+  # regional service endpoints (S3, ECR, CloudWatch Logs, SSM, STS) over the IGW. The *destination*
+  # stays 0.0.0.0/0 for now (those endpoints are arbitrary AWS-owned public IPs); it becomes genuinely
+  # CIDR/prefix-list-scopable only under the VPC endpoints architecture (CZID-352, design:
+  # VPC-ENDPOINTS-ARCHITECTURE-2026-06-29.md), after which this is replaced with VPC-CIDR + gateway
+  # prefix-lists + explicit external rules.
+  # What we CAN tighten now: egress is narrowed off all-protocol/all-port ("-1") to the exact
+  # ports these workloads use — HTTPS (AWS APIs, ECR, S3), HTTP (package/mirror pulls) and DNS.
+  # This removes arbitrary-port outbound (the C2/exfil path the finding warns about) and clears
+  # CKV_AWS_382. Trivy AWS-0104 still flags the 0.0.0.0/0 destination — kept, baselined in
+  # .trivyignore with this justification, until CZID-352 lands.
   name   = "idseq-${var.DEPLOYMENT_ENVIRONMENT}"
   vpc_id = aws_vpc.idseq.id
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    description = "HTTPS to AWS service endpoints / ECR / S3"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  egress {
+    description = "HTTP for package/mirror pulls"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  egress {
+    description = "DNS (UDP)"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  egress {
+    description = "DNS (TCP)"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 }

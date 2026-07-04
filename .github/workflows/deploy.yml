@@ -27,6 +27,11 @@ permissions:
 jobs:
   DeployTerraform:
     runs-on: ubuntu-latest
+    # C4: gate the deploy by the GitHub Environment so prod requires the reviewer
+    # approval configured on the Environment (protection rules land with #81). Was
+    # ungated — an auto-approve `terraform apply` behind only a shell branch/account
+    # guard, with no environment: and no plan-linkage.
+    environment: ${{ inputs.environment }}
     steps:
       - name: Git clone the repository
         uses: actions/checkout@v6

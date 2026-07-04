@@ -9,7 +9,11 @@ terraform {
   required_version = ">= 1.10" # >= 1.10 for native S3 state locking (use_lockfile)
   required_providers {
     aws = {
-      version = "~> 4.54"
+      # CZID-41: aws 5.x (>= 5.31 knows the python3.12 lambda runtime the
+      # chalice codegen now emits). The generated chalice.tf.json modules
+      # hardcode "< 5"; scripts/package_lambda.py relaxes that to "< 6" so
+      # terraform's provider-version intersection allows this pin.
+      version = "~> 5.31"
     }
   }
 }
