@@ -9,7 +9,9 @@
 #     arbitrary-port C2/exfil path). The 0.0.0.0/0 *destination* is retained (public-subnet Batch/ECS
 #     tiers must reach arbitrary AWS/NCBI endpoints with no VPC endpoints yet) so AWS-0104 still fires;
 #     kept baselined until the VPC endpoints architecture lands (CZID-352). | 0130 IMDS token | 0132 bucket CMK
-#   DS-0002 no non-root USER | DS-0015 yum clean | DS-0029 --no-install-recommends
+#   DS-0002 (non-root USER), DS-0015 (yum clean), DS-0029 (--no-install-recommends): REMEDIATED in
+#     CZID-64 — the four lambda/build Dockerfiles now run as a non-root user and clean their package
+#     manager caches, so these no longer fire and their baseline entries are removed.
 AWS-0031
 AWS-0089
 AWS-0095
@@ -17,9 +19,6 @@ AWS-0096
 AWS-0104
 AWS-0130
 AWS-0132
-DS-0002
-DS-0015
-DS-0029
 
 # --- npm CVEs in lambdas/taxon-indexing-concurrency-manager/package-lock.json (axios, form-data, …) ---
 # FIXABLE — these clear by updating the lambda deps; tracked in backlog #294 for a dep bump. Baselined

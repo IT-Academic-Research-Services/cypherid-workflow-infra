@@ -51,8 +51,7 @@
         {
           "resource": "/lambdas/Dockerfile.",
           "check_ids": [
-            "CKV_DOCKER_2",
-            "CKV_DOCKER_3"
+            "CKV_DOCKER_2"
           ]
         }
       ]
@@ -63,8 +62,7 @@
         {
           "resource": "/lambdas/taxon-indexing-concurrency-manager/Dockerfile.",
           "check_ids": [
-            "CKV_DOCKER_2",
-            "CKV_DOCKER_3"
+            "CKV_DOCKER_2"
           ]
         }
       ]
@@ -75,8 +73,7 @@
         {
           "resource": "/local-base-images/Dockerfile.node-base.",
           "check_ids": [
-            "CKV_DOCKER_2",
-            "CKV_DOCKER_3"
+            "CKV_DOCKER_2"
           ]
         }
       ]
@@ -87,8 +84,7 @@
         {
           "resource": "/local-base-images/Dockerfile.python-base.",
           "check_ids": [
-            "CKV_DOCKER_2",
-            "CKV_DOCKER_3"
+            "CKV_DOCKER_2"
           ]
         }
       ]

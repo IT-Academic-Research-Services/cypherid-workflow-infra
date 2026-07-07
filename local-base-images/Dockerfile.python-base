@@ -1,10 +1,18 @@
 FROM public.ecr.aws/lambda/python:3.8
 
-# Copy and unzip pre-packaged code/dependencies into the working directory
-RUN yum install unzip -y
+# Copy and unzip pre-packaged code/dependencies into the working directory.
+# `yum clean all` + rm of the cache clears DS-0015 and shrinks the layer.
+RUN yum install unzip -y \
+    && yum clean all \
+    && rm -rf /var/cache/yum
 COPY deployment.zip ${LAMBDA_TASK_ROOT}
 RUN unzip ${LAMBDA_TASK_ROOT}/deployment.zip -d ${LAMBDA_TASK_ROOT}
 
 ENV DEPLOYMENT_ENVIRONMENT=dev
+
+# Run as an unprivileged user (DS-0002 / CKV_DOCKER_3). The minimal Lambda base
+# image has no useradd, but ships a stock `nobody` account; the RIC only needs
+# read access to ${LAMBDA_TASK_ROOT} (/var/task), which is world-readable (0755).
+USER nobody
 
 CMD [ "app.handler" ]
