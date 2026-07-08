@@ -4,6 +4,15 @@ locals {
   launch_template_user_data_hash = filemd5(local.launch_template_user_data_file)
 }
 
+# Retention (days) for the lambda CloudWatch log groups this repo manages (CZID-63).
+# Applied to the start_index_generation group here and passed to the concurrency-manager
+# module so all managed lambda logs expire on the same schedule instead of never.
+variable "lambda_log_retention_in_days" {
+  type        = number
+  default     = 90
+  description = "CloudWatch Logs retention in days for lambda log groups managed by this repo."
+}
+
 data "aws_ssm_parameter" "idseq_batch_ami" {
   # NOTE: this conditional is because moto errors on creating ssm parameters that begin with aws or ssm
   name = "/${var.DEPLOYMENT_ENVIRONMENT == "test" ? "mock-aws" : "aws"}/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id"
@@ -232,6 +241,21 @@ resource "aws_iam_role_policy" "start_index_generation_lambda" {
   })
 }
 
+# CloudWatch log group for the start_index_generation lambda (CZID-63). Declared
+# explicitly so logs have a bounded retention and encryption-at-rest instead of the
+# implicit, never-expiring, AWS-owned-key group Lambda auto-creates on first invoke.
+# The group is created before the lambda (see depends_on below) so the function writes
+# into this managed group. In an env where the implicit group already exists, import it
+# once (terraform import) before the first apply.
+resource "aws_cloudwatch_log_group" "start_index_generation" {
+  #checkov:skip=CKV_AWS_338:90-day retention (var.lambda_log_retention_in_days) is the deliberate cost/policy choice for these lambda log groups; CKV_AWS_338 wants >=1 year. Logs are KMS-encrypted via the workflows CMK below (CZID-63).
+  name              = "/aws/lambda/idseq-start_index_generation-${var.DEPLOYMENT_ENVIRONMENT}"
+  retention_in_days = var.lambda_log_retention_in_days
+  # Reuse the workflows customer-managed key (CZID-57). CloudWatch Logs usage of the key
+  # is granted in kms.tf. The key policy dependency is implicit via this reference.
+  kms_key_id = aws_kms_key.workflows.arn
+}
+
 resource "aws_lambda_function" "start_index_generation" {
   function_name    = "idseq-start_index_generation-${var.DEPLOYMENT_ENVIRONMENT}"
   runtime          = "python3.8"
@@ -242,6 +266,9 @@ resource "aws_lambda_function" "start_index_generation" {
   filename         = data.archive_file.lambda_archive.output_path
 
   role = aws_iam_role.start_index_generation_lambda.arn
+
+  # Ensure the managed log group exists before the function can auto-create an implicit one.
+  depends_on = [aws_cloudwatch_log_group.start_index_generation]
 
   environment {
     variables = {

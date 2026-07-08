@@ -23,4 +23,28 @@ data "aws_iam_policy_document" "workflows_kms" {
       identifiers = formatlist("arn:aws:iam::%s:root", var.AWS_ACCOUNT_ID)
     }
   }
+
+  # Allow the CloudWatch Logs service to use this key so the managed lambda log groups
+  # (CZID-63) can be encrypted with it. Scoped by encryption context to this account's
+  # /aws/lambda/* groups so the grant can't be borrowed to decrypt unrelated log data.
+  statement {
+    sid = "AllowCloudWatchLogs"
+    actions = [
+      "kms:Encrypt",
+      "kms:Decrypt",
+      "kms:ReEncrypt*",
+      "kms:GenerateDataKey*",
+      "kms:DescribeKey",
+    ]
+    resources = ["*"]
+    principals {
+      type        = "Service"
+      identifiers = ["logs.${var.AWS_DEFAULT_REGION}.amazonaws.com"]
+    }
+    condition {
+      test     = "ArnLike"
+      variable = "kms:EncryptionContext:aws:logs:arn"
+      values   = ["arn:aws:logs:${var.AWS_DEFAULT_REGION}:${var.AWS_ACCOUNT_ID}:log-group:/aws/lambda/*"]
+    }
+  }
 }
