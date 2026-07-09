@@ -18,7 +18,10 @@ fi
 echo ">> interpreter: $("$PY" --version 2>&1)"
 
 # Lambdas that ship a unit-test suite (extend as more gain tests).
-TESTED=(taxon-indexing-eviction)
+# The suites are pure (no live AWS); the sfn-io-helper and cloudwatch-alerting
+# suites cover only chalicelib logic that never imports the chalice framework,
+# so they are unaffected by the chalice/py312 packaging blocker (CZID-443).
+TESTED=(taxon-indexing-eviction sfn-io-helper cloudwatch-alerting)
 
 rc=0
 for d in "${TESTED[@]}"; do
