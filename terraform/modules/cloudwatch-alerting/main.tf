@@ -8,10 +8,10 @@
 # handler as an aws_lambda_function resource keyed by its handler name, i.e.
 # aws_lambda_function.scan_logs_and_alert and aws_lambda_function.custom_invocation
 # (function_name "cloudwatch-alerting-<stage>-<handler>"). CI (validate.yml) and
-# the deploy/plan Make targets all run that codegen before tofu init/validate/apply,
+# the deploy/plan Make targets all run that codegen before terraform init/validate/apply,
 # so these references resolve at build time.
 #
-# Consequence: running `tofu validate` on this module WITHOUT first running
+# Consequence: running `terraform validate` on this module WITHOUT first running
 # `make package-lambdas` reports "Reference to undeclared resource
 # aws_lambda_function ..." -- that is the missing codegen, NOT a bug in this
 # module. Do not "fix" it by repointing to data.aws_lambda_function lookups:
