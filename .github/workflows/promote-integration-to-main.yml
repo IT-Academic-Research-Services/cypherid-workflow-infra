@@ -1,0 +1,81 @@
+# Weekly roll-up of the reviewed `integration` trunk onto `main`. See docs/branching.md.
+#
+# Two triggers, one path:
+#   - schedule:        the weekly cadence
+#   - workflow_dispatch: an off-cycle / hotfix promotion, kicked off manually. The fix
+#                        still went through `integration` (checks + review) first.
+#
+# The job opens (or reuses) an `integration -> main` PR and enables auto-merge. Branch
+# protection on `main` (required checks) gates the merge, so the roll-up only lands when
+# integration's HEAD is green. Every promoted commit was already reviewed on its own PR
+# into integration, so `main` requires checks but not a second review.
+#
+# Prereqs (one-time): repo "Allow auto-merge" enabled; `main` protection requires a PR +
+# the required checks (0 required reviews). A merge to `main` does NOT auto-apply
+# terraform -- applies are a separate manual dispatch.
+name: Promote integration -> main
+
+on:
+  schedule:
+    - cron: "0 15 * * 1"  # Mondays 15:00 UTC
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Off-cycle/hotfix promotion context (recorded on the PR)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: promote-integration-to-main
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: github.repository == 'thorvath-slower/cypherid-workflow-infra'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Is there anything to promote?
+        id: diff
+        run: |
+          set -euo pipefail
+          git fetch origin main integration
+          ahead=$(git rev-list --count origin/main..origin/integration)
+          echo "ahead=$ahead" >> "$GITHUB_OUTPUT"
+          if [ "$ahead" -eq 0 ]; then
+            echo "integration has nothing ahead of main -- nothing to promote."
+          else
+            echo "integration is $ahead commit(s) ahead of main."
+          fi
+
+      - name: Open or reuse the promotion PR + enable auto-merge
+        if: steps.diff.outputs.ahead != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REASON: ${{ github.event.inputs.reason }}
+          TRIGGER: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          stamp=$(date -u +%Y-%m-%d)
+          title="Promote integration -> main (${stamp})"
+          body="Automated roll-up of the reviewed \`integration\` trunk onto \`main\`."$'\n'"Trigger: ${TRIGGER}."
+          if [ -n "${REASON}" ]; then
+            body="${body}"$'\n'"Reason: ${REASON}"
+          fi
+
+          existing=$(gh pr list --base main --head integration --state open --json number --jq '.[0].number // empty')
+          if [ -z "${existing}" ]; then
+            gh pr create --base main --head integration --title "${title}" --body "${body}"
+          else
+            echo "Reusing open promotion PR #${existing}."
+          fi
+
+          gh pr merge integration --auto --merge --subject "${title}"
