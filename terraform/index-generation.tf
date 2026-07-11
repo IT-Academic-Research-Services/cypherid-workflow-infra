@@ -258,7 +258,7 @@ resource "aws_cloudwatch_log_group" "start_index_generation" {
 
 resource "aws_lambda_function" "start_index_generation" {
   function_name    = "idseq-start_index_generation-${var.DEPLOYMENT_ENVIRONMENT}"
-  runtime          = "python3.8"
+  runtime          = "python3.12"
   handler          = "main.start_index_generation"
   memory_size      = 256
   timeout          = 600
