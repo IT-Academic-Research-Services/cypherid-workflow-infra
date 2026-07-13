@@ -1,19 +1,11 @@
-name: Terraform Plan
-run-name: Terraform Plan in env ${{ inputs.environment || github.base_ref || github.ref_name }} branch ${{ github.base_ref || github.ref_name }} by ${{ github.actor }}
+name: Plan only
+run-name: Plan only in env ${{ inputs.environment || github.base_ref || github.ref_name }} branch ${{ github.base_ref || github.ref_name }} by ${{ github.actor }}
 
 on:
-  push:
-    branches:
-      - development
-      - staging
-      - main
-      - 'releases/**'
-  pull_request:
-    branches:
-      - development
-      - staging
-      - main
-      - 'releases/**'
+  # Planning assumes an AWS OIDC role (czid-<env>-gh-actions-executor) and reads
+  # the real S3 backend, so it can't run until GitHub Environments + OIDC roles
+  # exist (CZID-81 / CZID-26). Until then it is manual-only; the no-AWS
+  # validate.yml is the automatic push/PR gate.
   workflow_dispatch:
     inputs:
       environment:
@@ -26,7 +18,7 @@ env:
   branch_name: ${{ github.base_ref || github.ref_name }}
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-permissions: #write-all
+permissions:
   id-token: write
   contents: read
 
@@ -48,23 +40,23 @@ jobs:
         run: |
           echo "branch_name=${{ env.branch_name }}"
           echo "environment=${{ inputs.environment }}"
-          echo "| Planning | Environment | Branch |" >> $GITHUB_STEP_SUMMARY
-          echo "| ---------------- | ----------- | ------ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Planning | Environment | Branch |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ---------------- | ----------- | ------ |" >> "$GITHUB_STEP_SUMMARY"
           if [[ -n "${{ inputs.environment }}" ]]; then
             echo "environment=${{ inputs.environment }}" >> "$GITHUB_OUTPUT"
-            echo "| :green_circle: Enabled | ${{ inputs.environment }} | ${{ env.branch_name }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| :green_circle: Enabled | ${{ inputs.environment }} | ${{ env.branch_name }} |" >> "$GITHUB_STEP_SUMMARY"
           elif [[ "${{ env.branch_name }}" == "development" ]]; then
             echo "environment=dev" >> "$GITHUB_OUTPUT"
-            echo "| :green_circle: Enabled | dev | ${{ env.branch_name }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| :green_circle: Enabled | dev | ${{ env.branch_name }} |" >> "$GITHUB_STEP_SUMMARY"
           elif [[ "${{ env.branch_name }}" == "staging" ]]; then
             echo "environment=staging" >> "$GITHUB_OUTPUT"
-            echo "| :green_circle: Enabled | staging | ${{ env.branch_name }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| :green_circle: Enabled | staging | ${{ env.branch_name }} |" >> "$GITHUB_STEP_SUMMARY"
           elif [[ "${{ env.branch_name }}" == "main" ]]; then
             echo "environment=prod" >> "$GITHUB_OUTPUT"
-            echo "| :green_circle: Enabled | prod | ${{ env.branch_name }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| :green_circle: Enabled | prod | ${{ env.branch_name }} |" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "environment=" >> "$GITHUB_OUTPUT"
-            echo "| :yellow_circle: Disabled | | ${{ env.branch_name }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| :yellow_circle: Disabled | | ${{ env.branch_name }} |" >> "$GITHUB_STEP_SUMMARY"
           fi
 
   plan:
@@ -85,7 +77,7 @@ jobs:
       - plan
     steps:
       - name: Download Results
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           artifact-ids: ${{ needs.plan.outputs.result-artifact-id }}
           path: results
@@ -95,16 +87,17 @@ jobs:
           ls -al results/*/
           jq --slurp . results/*/*.json
 
-          echo "|   | Total Changes |" >> $GITHUB_STEP_SUMMARY
-          echo "| - | ------------- |" >> $GITHUB_STEP_SUMMARY
+          echo "|   | Total Changes |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| - | ------------- |" >> "$GITHUB_STEP_SUMMARY"
           jq -n '{change_count: [inputs.change_count] | add}' results/*/*.json | jq -r '"|\(if .change_count == 0 then ":green_circle:" else ":yellow_circle:" end)|\(.change_count)|"'
-          jq -n '{change_count: [inputs.change_count] | add}' results/*/*.json | jq -r '"|\(if .change_count == 0 then ":green_circle:" else ":yellow_circle:" end)|\(.change_count)|"' >> $GITHUB_STEP_SUMMARY
+          # shellcheck disable=SC2129  # redirects interleaved with stdout-only echoes/jq; grouping would reorder or obscure output
+          jq -n '{change_count: [inputs.change_count] | add}' results/*/*.json | jq -r '"|\(if .change_count == 0 then ":green_circle:" else ":yellow_circle:" end)|\(.change_count)|"' >> "$GITHUB_STEP_SUMMARY"
 
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "<br/>" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "<br/>" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          echo "| Action | Address |" >> $GITHUB_STEP_SUMMARY
-          echo "| ------ | ------- |" >> $GITHUB_STEP_SUMMARY
+          echo "| Action | Address |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ------ | ------- |" >> "$GITHUB_STEP_SUMMARY"
           jq -r '.resource_changes[] | "|\(.action)|\(.address)|"' results/*/*.json
-          jq -r '.resource_changes[] | "|\(.action)|\(.address)|"' results/*/*.json >> $GITHUB_STEP_SUMMARY
+          jq -r '.resource_changes[] | "|\(.action)|\(.address)|"' results/*/*.json >> "$GITHUB_STEP_SUMMARY"

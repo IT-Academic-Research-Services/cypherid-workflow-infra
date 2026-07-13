@@ -4,7 +4,7 @@ set -a
 AWS_DEFAULT_REGION=us-west-2
 AWS_DEFAULT_OUTPUT=json
 DEBIAN_FRONTEND=noninteractive
-TERRAFORM_VERSION=1.14.3
+TERRAFORM_VERSION="$(cat .terraform-version)"  # SSOT pin (.terraform-version) — CZID-374
 GH_CLI_VERSION=1.7.0
 LC_ALL=C.UTF-8
 LANG=C.UTF-8

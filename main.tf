@@ -6,14 +6,13 @@ variable "app_name" {
 variable "owner" { type = string }
 
 terraform {
-  required_version = ">= 1.14.3"
-  required_providers {
-    aws = {
-      version = "~> 5.100.0"
-    }
-  }
+  # required_version + required_providers live in versions.tf (CZID-169 SSOT).
   backend "s3" {
     region = "us-west-2"
+    # S3-native state locking (Terraform/TF >= 1.10): writes a <key>.tflock object
+    # alongside the state so concurrent applies can't corrupt it. No DynamoDB
+    # table required. (CZID-29 / STATE-1.)
+    use_lockfile = true
   }
 }
 
@@ -32,7 +31,7 @@ provider "aws" {
   }
   ignore_tags {
     key_prefixes = ["QSConfigId-", "QSConfigName-"]
-    keys         = ["Name", "environment", "env", "owner", "project", "application", "managedBy", "service"]
+    keys         = ["environment", "env", "owner", "project", "application", "managedBy"]
   }
 }
 

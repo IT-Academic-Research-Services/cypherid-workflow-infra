@@ -1,0 +1,16 @@
+# gitleaks config for cypherid-workflow-infra.
+# Extends the default ruleset and allowlists a VERIFIED FALSE POSITIVE (CZID-318): the generic-api-key
+# rule misfires on the boto3 SSM call `get_parameters(..., WithDecryption=True)` in
+# lambdas/taxon-indexing-eviction/chalicelib/config.py — that's an SSM decrypt flag, not a secret.
+# Matched on the line content, so a real key assignment is NOT covered and still hard-fails the gate.
+title = "cypherid-workflow-infra gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Verified false positive (CZID-318): boto3 SSM WithDecryption=True — not a secret."
+regexTarget = "line"
+regexes = [
+  '''WithDecryption\s*=\s*True''',
+]

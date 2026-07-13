@@ -1,8 +1,5 @@
 module "swipe" {
-  # TODO: Use chanzuckerberg/swipe once they merge in PR https://github.com/chanzuckerberg/swipe/pull/124
-  #       But don't hold your breath. That repo hasn't been updated since April 2025
-  # source = "github.com/chanzuckerberg/swipe?ref=v1.4.9"
-  source = "github.com/jsims-slower/swipe"
+  source = "github.com/chanzuckerberg/swipe?ref=v1.4.9"
   tags = {
     Name = "swipe"
   }
@@ -114,13 +111,6 @@ module "swipe" {
       // so that the intended machine may see it faster:
       visibility_timeout_seconds : var.DEPLOYMENT_ENVIRONMENT == "dev" ? "10" : "120",
     },
-    "nextgen-web" : {
-      dead_letter : var.DEPLOYMENT_ENVIRONMENT == "dev" ? "true" : "false",
-      // We have different settings for dev below b/c multiple dev machines may view
-      // and ignore the messages, which drives up the receiveCount. Timeout is lower
-      // so that the intended machine may see it faster:
-      visibility_timeout_seconds : var.DEPLOYMENT_ENVIRONMENT == "dev" ? "10" : "120",
-    },
   }
 
   output_status_json_files = true
@@ -168,8 +158,45 @@ resource "aws_security_group" "aegea-ecs-sg" {
   }
 }
 
-resource "aws_vpc_security_group_egress_rule" "aegea-ecs-allow_all_traffic_ipv4" {
+# CZID-56: the aegea/SWIPE ECS workflow tier needs to reach AWS service endpoints (ECR image
+# pulls, S3, Step Functions, Batch, CloudWatch Logs) over the IGW. The single all-protocol/all-port
+# rule to 0.0.0.0/0 is replaced with per-port rules (HTTPS + HTTP + DNS): the destination stays
+# 0.0.0.0/0 (arbitrary AWS-owned public IPs — scopable only under CZID-352 VPC endpoints), but
+# arbitrary-port outbound (the C2/exfil path AWS-0104 warns about) is removed. Trivy AWS-0104 still
+# flags the 0.0.0.0/0 destination on each rule — kept + baselined in .trivyignore with this
+# justification. (Checkov CKV_AWS_382 does not apply to aws_vpc_security_group_egress_rule.)
+resource "aws_vpc_security_group_egress_rule" "aegea-ecs-allow_https_ipv4" {
   security_group_id = aws_security_group.aegea-ecs-sg.id
+  description       = "HTTPS to AWS service endpoints / ECR / S3"
   cidr_ipv4         = "0.0.0.0/0"
-  ip_protocol       = "-1" # semantically equivalent to all ports
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+}
+
+resource "aws_vpc_security_group_egress_rule" "aegea-ecs-allow_http_ipv4" {
+  security_group_id = aws_security_group.aegea-ecs-sg.id
+  description       = "HTTP for package/mirror pulls"
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "tcp"
+  from_port         = 80
+  to_port           = 80
+}
+
+resource "aws_vpc_security_group_egress_rule" "aegea-ecs-allow_dns_udp_ipv4" {
+  security_group_id = aws_security_group.aegea-ecs-sg.id
+  description       = "DNS (UDP)"
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "udp"
+  from_port         = 53
+  to_port           = 53
+}
+
+resource "aws_vpc_security_group_egress_rule" "aegea-ecs-allow_dns_tcp_ipv4" {
+  security_group_id = aws_security_group.aegea-ecs-sg.id
+  description       = "DNS (TCP)"
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "tcp"
+  from_port         = 53
+  to_port           = 53
 }

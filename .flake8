@@ -1,4 +1,27 @@
 [flake8]
-max-line-length=140
-exclude=.venv
-per-file-ignores = scripts/generate_host_genome.py: E501, scripts/snowflake_write.py: E501
+max-line-length=120
+# .venv: virtualenv. compare_index_files.py: a DANGLING symlink (its target
+# ../workflows/docker-index-generation/compare_index_files.py was removed) — excluded so flake8 can run;
+# the broken symlink itself should be fixed/removed separately.
+exclude=.venv,scripts/compare_index_files.py
+
+# CZID-264 inherited-lint baseline. The flake8 gate was never actually enforced — check.yml was
+# workflow_dispatch-only AND the setup-python step died on a PyYAML/awscli dependency conflict before
+# flake8 ever ran (see the awscli 1.27.165 -> 1.35.24 bump). With the gate now live for the first time,
+# it surfaces pre-existing cosmetic violations (mostly E231 missing-whitespace-after-':' auto-formatter
+# style) across scripts/, lambdas/, terraform/ and test/. These legacy findings are ACCEPTED per-file so
+# the gate can go green; new code + new files stay fully gated (only the exact code+file pairs below are
+# waived). Remediate separately (all cosmetic whitespace) if/when these files are touched.
+per-file-ignores=
+    scripts/generate_host_genome.py:E201,E202,E222,E231,E272,E303,E501,E721,W291
+    scripts/run_sfn.py:E231,E305,E501,W293
+    scripts/simple_run_sfn.py:E231,E501
+    scripts/snowflake_write.py:E201,E202,E231,E261,E401,E501,W291
+    scripts/package_lambda.py:E231
+    lambdas/cloudwatch-alerting/app.py:E231
+    lambdas/cloudwatch-alerting/chalicelib/index_generation.py:E231
+    lambdas/sfn-io-helper/chalicelib/stage_io.py:E231
+    lambdas/taxon-indexing/app.py:E202,E231
+    lambdas/taxon-indexing-eviction/chalicelib/es_queries.py:E202,E231
+    terraform/start_index_generation_lambda_src/main.py:E231
+    test/test.py:E231

@@ -1,0 +1,30 @@
+name: security
+
+# Calls the shared reusable security workflow — the SSOT in thorvath-slower/seqtoid-ci-workflows (CZID-310).
+# One definition for all repos; this repo only keeps its own .trivyignore baseline (CZID-264) and passes
+# its codegen as `prepare` so the IaC scanners see the complete config (this repo generates config from
+# the lambda packaging step).
+on:
+  push:
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+    inputs:
+      run_checkov:
+        description: "Also run the full Checkov policy pass (full-suite / prod check)"
+        type: boolean
+        default: false
+
+jobs:
+  security:
+    # CZID-433 (F5b): repointed off the archived ci-workflows predecessor's mutable branch ref to the
+    # current SSOT tag. The checkov_baseline/checkov_soft_fail inputs were ported into v1 (CZID-416), so
+    # the @v1 reusable interface now accepts everything this caller passes.
+    uses: thorvath-slower/seqtoid-ci-workflows/.github/workflows/security.yml@v1
+    with:
+      run_checkov: true                   # checkov is now a GATE on every run (was workflow_dispatch-only)
+      checkov_soft_fail: false            # hard-fail on findings NOT in the baseline
+      checkov_baseline: .checkov.baseline # 50 inherited findings accepted (CZID-264); gate on NEW only
+      prepare: |
+        source ./environment.test
+        make package-lambdas

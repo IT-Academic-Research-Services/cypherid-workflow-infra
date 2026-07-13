@@ -7,6 +7,7 @@ from os.path import join
 from string import Template
 from subprocess import run
 
+
 logging.basicConfig(level=logging.INFO)
 
 
@@ -76,7 +77,15 @@ def package_lambda(name: str):
         with open(terraform_json_path) as f:
             terraform_json = json.load(f)
         del terraform_json['terraform']['required_version']
-        del terraform_json['terraform']['required_providers']['aws']
+        # CZID-41: chalice (chalice/package.py) hardcodes the generated aws
+        # provider constraint at ">= 2, < 5", which excludes the aws 5.x
+        # provider this repo now targets (versions.tf SSOT, for the python3.12
+        # lambda runtime). Terraform intersects all required_providers, so the
+        # generated "< 5" would veto 5.x on every lambda module. Relax the upper
+        # bound to "< 6" here; the root versions.tf remains the actual pin.
+        aws_req = terraform_json['terraform'].get('required_providers', {}).get('aws')
+        if aws_req and '< 5' in aws_req.get('version', ''):
+            aws_req['version'] = aws_req['version'].replace('< 5', '< 6')
         if deployment_environment == 'test' and 'aws_lambda_permission' in terraform_json.get('resource'):
             # Disabled due to lack of support in moto
             del terraform_json['resource']['aws_lambda_permission']

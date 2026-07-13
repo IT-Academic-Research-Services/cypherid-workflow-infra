@@ -4,6 +4,15 @@ locals {
   launch_template_user_data_hash = filemd5(local.launch_template_user_data_file)
 }
 
+# Retention (days) for the lambda CloudWatch log groups this repo manages (CZID-63).
+# Applied to the start_index_generation group here and passed to the concurrency-manager
+# module so all managed lambda logs expire on the same schedule instead of never.
+variable "lambda_log_retention_in_days" {
+  type        = number
+  default     = 90
+  description = "CloudWatch Logs retention in days for lambda log groups managed by this repo."
+}
+
 data "aws_ssm_parameter" "idseq_batch_ami" {
   # NOTE: this conditional is because moto errors on creating ssm parameters that begin with aws or ssm
   name = "/${var.DEPLOYMENT_ENVIRONMENT == "test" ? "mock-aws" : "aws"}/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id"
@@ -38,17 +47,47 @@ data "aws_subnets" "webservice_subnets" {
 }
 
 resource "aws_security_group" "index_generation" {
+  # CZID-56: same rationale as aws_security_group.idseq — public-subnet Batch tier with no VPC
+  # endpoints must reach AWS service endpoints AND download reference data (NCBI etc.) from arbitrary
+  # public hosts over the IGW, all over HTTP/HTTPS. Destination stays 0.0.0.0/0 (arbitrary reference
+  # sources) until the VPC endpoints architecture lands (CZID-352, design:
+  # VPC-ENDPOINTS-ARCHITECTURE-2026-06-29.md). Egress is narrowed off "-1"/all-ports to HTTPS + HTTP
+  # + DNS, which removes arbitrary-port outbound and clears CKV_AWS_382; Trivy AWS-0104 (0.0.0.0/0
+  # destination) is kept + baselined in .trivyignore with this justification.
   name   = "index-generation-${var.DEPLOYMENT_ENVIRONMENT}"
   vpc_id = length(data.aws_vpc.webservice_vpc) > 0 ? data.aws_vpc.webservice_vpc[0].id : aws_vpc.idseq.id
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    description = "HTTPS to AWS endpoints / reference data sources"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  egress {
+    description = "HTTP for reference data / mirror pulls"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  egress {
+    description = "DNS (UDP)"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  egress {
+    description = "DNS (TCP)"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
 
 resource "aws_launch_template" "index_generation_launch_template" {
+  # checkov:skip=CKV_AWS_341:hop_limit=2 is required for AWS Batch container workloads to reach IMDS (container→host→IMDS = 2 hops). IMDSv2 is still enforced via http_tokens=required. (CZID-57)
   # AWS Batch pins a specific version of the launch template when a compute environment is created.
   # The CE does not support updating this version, and needs replacing (redeploying) if launch template contents change.
   # The launch template resource increments its version when contents change, but the compute environment resource does
@@ -99,7 +138,7 @@ resource "aws_batch_compute_environment" "index_generation_compute_environment" 
       Name = "${local.service_name}-batch"
     }
 
-    image_id           = data.aws_ssm_parameter.idseq_batch_ami.value
+    image_id = data.aws_ssm_parameter.idseq_batch_ami.value
     #TODO: Is this needed?
     # ec2_key_pair       = "idseq-${var.DEPLOYMENT_ENVIRONMENT}"
     min_vcpus          = 0
@@ -202,6 +241,21 @@ resource "aws_iam_role_policy" "start_index_generation_lambda" {
   })
 }
 
+# CloudWatch log group for the start_index_generation lambda (CZID-63). Declared
+# explicitly so logs have a bounded retention and encryption-at-rest instead of the
+# implicit, never-expiring, AWS-owned-key group Lambda auto-creates on first invoke.
+# The group is created before the lambda (see depends_on below) so the function writes
+# into this managed group. In an env where the implicit group already exists, import it
+# once (terraform import) before the first apply.
+resource "aws_cloudwatch_log_group" "start_index_generation" {
+  #checkov:skip=CKV_AWS_338:90-day retention (var.lambda_log_retention_in_days) is the deliberate cost/policy choice for these lambda log groups; CKV_AWS_338 wants >=1 year. Logs are KMS-encrypted via the workflows CMK below (CZID-63).
+  name              = "/aws/lambda/idseq-start_index_generation-${var.DEPLOYMENT_ENVIRONMENT}"
+  retention_in_days = var.lambda_log_retention_in_days
+  # Reuse the workflows customer-managed key (CZID-57). CloudWatch Logs usage of the key
+  # is granted in kms.tf. The key policy dependency is implicit via this reference.
+  kms_key_id = aws_kms_key.workflows.arn
+}
+
 resource "aws_lambda_function" "start_index_generation" {
   function_name    = "idseq-start_index_generation-${var.DEPLOYMENT_ENVIRONMENT}"
   runtime          = "python3.8"
@@ -212,6 +266,9 @@ resource "aws_lambda_function" "start_index_generation" {
   filename         = data.archive_file.lambda_archive.output_path
 
   role = aws_iam_role.start_index_generation_lambda.arn
+
+  # Ensure the managed log group exists before the function can auto-create an implicit one.
+  depends_on = [aws_cloudwatch_log_group.start_index_generation]
 
   environment {
     variables = {

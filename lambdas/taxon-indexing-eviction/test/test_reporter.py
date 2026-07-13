@@ -3,6 +3,7 @@
 from chalicelib import reporter
 import test.test_data as test_data
 import pytest
+from unittest.mock import call
 
 
 @pytest.fixture(autouse=True)
@@ -113,20 +114,26 @@ class TestReportTaskCleanup:
 class TestReportCapacity:
     def test_reports_capacity_zero(self, mocker):
         spy_logger = mocker.spy(reporter, "logger")
+        mocker.patch.object(
+            reporter, "get_parameters", return_value={"EVICTION_TASK_CONCURRENCY": 5}
+        )
 
         reporter.report_capacity(0)
         spy_logger.info.assert_called_once_with(
-            "Max deletion task concurrency %s reached. No tasks started.", 0
+            "Max deletion task concurrency %s reached. No tasks started.", 5
         )
 
         assert reporter._final_report["capacity"] == 0
 
     def test_reports_capacity_nonzero(self, mocker):
         spy_logger = mocker.spy(reporter, "logger")
+        mocker.patch.object(
+            reporter, "get_parameters", return_value={"EVICTION_TASK_CONCURRENCY": 5}
+        )
 
         reporter.report_capacity(2)
         spy_logger.info.assert_called_once_with(
-            "Max deletion task concurrency %s not reached. Starting tasks... ", 2
+            "Max deletion task concurrency %s not reached. Starting tasks... ", 5
         )
 
         assert reporter._final_report["capacity"] == 2
@@ -185,18 +192,18 @@ class TestReportEvictionsStarted:
             "by_pipeline_run_id_and_background_id",
         )
 
-        spy_logger.info.has_calls(
+        spy_logger.info.assert_has_calls(
             [
-                [
+                call(
                     "%s evictions started: %s",
                     "by_pipeline_run_id",
                     by_pipeline_evictions_started,
-                ],
-                [
+                ),
+                call(
                     "%s evictions started: %s",
                     "by_pipeline_run_id_and_background_id",
                     by_pipeline_run_and_background_id_evictions_started,
-                ],
+                ),
             ]
         )
 
@@ -241,18 +248,18 @@ class TestReportEvictionsStarted:
             "by_pipeline_run_id_and_background_id",
         )
 
-        spy_logger.info.has_calls(
+        spy_logger.info.assert_has_calls(
             [
-                [
+                call(
                     "%s evictions started: %s",
                     "by_pipeline_run_id",
                     by_pipeline_evictions_started,
-                ],
-                [
+                ),
+                call(
                     "%s evictions started: %s",
                     "by_pipeline_run_id_and_background_id",
                     by_pipeline_run_and_background_id_evictions_started,
-                ],
+                ),
             ]
         )
 
@@ -305,18 +312,18 @@ class TestReportEvictionsStarted:
             "by_pipeline_run_id_and_background_id",
         )
 
-        spy_logger.info.has_calls(
+        spy_logger.info.assert_has_calls(
             [
-                [
+                call(
                     "%s evictions started: %s",
                     "by_pipeline_run_id",
                     by_pipeline_evictions_started,
-                ],
-                [
+                ),
+                call(
                     "%s evictions started: %s",
                     "by_pipeline_run_id_and_background_id",
                     by_pipeline_run_and_background_id_evictions_started,
-                ],
+                ),
             ]
         )
 

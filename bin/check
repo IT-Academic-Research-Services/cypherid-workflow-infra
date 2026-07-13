@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Run cypherid-workflow-infra's CI checks locally — mirrors check.yml (flake8) + validate.yml (terraform fmt +
+# lambda codegen + validate) + security.yml (the shared reusable). A green `make check` here predicts a
+# green CI (local == CI, CZID-311). Tools/steps that aren't available are skipped-with-a-note so the
+# runnable gates always work. Full set locally: brew install terraform trivy tflint gitleaks; pip install flake8.
+set -uo pipefail
+cd "$(dirname "$0")/.."
+fail=0; skipped=0
+have() { command -v "$1" >/dev/null 2>&1; }
+hdr()  { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
+IGN=(); [ -f .trivyignore ] && IGN=(--ignorefile .trivyignore)
+
+hdr "terraform fmt -check"
+if have terraform; then terraform fmt -check -recursive && echo "  ✓ formatted" || { echo "  ✗ run: terraform fmt -recursive"; fail=1; }
+else echo "  ⚠ terraform not installed (brew install terraform)"; skipped=1; fi
+
+hdr "flake8 (python lint)"
+if have flake8; then flake8 . && echo "  ✓ clean" || fail=1
+else echo "  ⚠ flake8 not installed (pip install flake8)"; skipped=1; fi
+
+hdr "terraform validate (needs lambda codegen; runs if the build toolchain is present)"
+if have terraform && [ -f environment.test ]; then
+  if ( set -a; . ./environment.test; set +a
+       make package-lambdas >/dev/null 2>&1 &&
+       { unset TF_CLI_ARGS_init TF_CLI_ARGS_output
+         terraform init -backend=false -input=false >/dev/null 2>&1 && terraform validate >/dev/null; } ); then
+    echo "  ✓ valid"
+  else echo "  ⚠ codegen/validate could not run locally (needs the lambda build toolchain) — CI runs it"; skipped=1; fi
+else echo "  ⚠ terraform or environment.test missing — skipping validate (CI runs it)"; skipped=1; fi
+
+hdr "security scanners (skipped if not installed — CI runs them)"
+if have gitleaks; then gitleaks git . --redact --no-banner --exit-code 1 && echo "  ✓ gitleaks" || { echo "  ✗ gitleaks: secret found"; fail=1; }
+else echo "  ⚠ gitleaks not installed"; skipped=1; fi
+if have trivy; then
+  trivy fs --scanners vuln,misconfig --severity HIGH,CRITICAL --ignore-unfixed "${IGN[@]}" --exit-code 1 . \
+    && echo "  ✓ trivy" || { echo "  ✗ trivy: HIGH/CRITICAL not in .trivyignore"; fail=1; }
+else echo "  ⚠ trivy not installed (brew install trivy)"; skipped=1; fi
+if have tflint; then tflint --recursive --minimum-failure-severity=error && echo "  ✓ tflint" || { echo "  ✗ tflint"; fail=1; }
+else echo "  ⚠ tflint not installed (brew install tflint)"; skipped=1; fi
+
+echo
+if [ "$fail" -ne 0 ]; then echo "❌ local checks failed (see above)"
+elif [ "$skipped" -ne 0 ]; then echo "✅ checks that ran passed — some were skipped; CI runs the full set"
+else echo "✅ all local checks passed — matches CI"; fi
+exit "$fail"

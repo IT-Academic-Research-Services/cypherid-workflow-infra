@@ -2,6 +2,7 @@
 
 from chalice import Chalice
 import logging
+import os
 from chalicelib.task_management import (
     discover_and_handle_existing_deletion_tasks,
     check_capacity,
@@ -14,7 +15,15 @@ from chalicelib.reporter import (
     report_eviction_candidates,
     deliver_final_report,
 )
+from chalicelib.sentry_init import init_sentry
 import chalicelib.config as config
+
+# Wire Sentry so unhandled Lambda errors (e.g. the TaxonIndexEvictionError raised
+# on a failed eviction run) reach the same Sentry project as the Rails backend
+# instead of dying silently in CloudWatch. Guarded so chalice codegen/CLI mode
+# does not init.
+if "AWS_CHALICE_CLI_MODE" not in os.environ:
+    init_sentry()
 
 EVICTION_TASK_CONCURRENCY = 1
 PIPELINE_RUN_CONCURRENCY = 1000

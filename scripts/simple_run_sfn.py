@@ -13,6 +13,7 @@ from typing import List, Union
 import boto3
 from aegea.sfn import watch as _watch
 
+
 sfn = boto3.client("stepfunctions")
 s3 = boto3.client("s3")
 

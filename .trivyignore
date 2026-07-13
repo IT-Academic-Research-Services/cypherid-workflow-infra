@@ -1,0 +1,41 @@
+# Trivy triaged-exceptions baseline for cypherid-workflow-infra (CZID-264).
+# Policy: ACCEPT the inherited HIGH/CRITICAL backlog, hard-fail on NEW only. Do NOT remediate here —
+# logged to backlog #294 for fix-forward. Established from PR #3's first runs.
+
+# --- IaC misconfigs (short trivy misconfig IDs, matching czid-infra's .trivyignore) ---
+#   AWS-0031 ECR mutable tags | 0089 S3 access logging | 0095 SNS unencrypted | 0096 SQS unencrypted
+#   AWS-0104 SG egress to 0.0.0.0/0 (CRITICAL). CZID-56: partially remediated — egress narrowed off
+#     all-protocol/all-port to HTTPS+HTTP+DNS only (clears Checkov CKV_AWS_382 + removes the
+#     arbitrary-port C2/exfil path). The 0.0.0.0/0 *destination* is retained (public-subnet Batch/ECS
+#     tiers must reach arbitrary AWS/NCBI endpoints with no VPC endpoints yet) so AWS-0104 still fires;
+#     kept baselined until the VPC endpoints architecture lands (CZID-352). | 0130 IMDS token | 0132 bucket CMK
+#   DS-0002 (non-root USER), DS-0015 (yum clean), DS-0029 (--no-install-recommends): REMEDIATED in
+#     CZID-64 — the four lambda/build Dockerfiles now run as a non-root user and clean their package
+#     manager caches, so these no longer fire and their baseline entries are removed.
+AWS-0031
+AWS-0089
+AWS-0095
+AWS-0096
+AWS-0104
+AWS-0130
+AWS-0132
+
+# --- npm CVEs in lambdas/taxon-indexing-concurrency-manager/package-lock.json (axios, form-data, …) ---
+# FIXABLE — these clear by updating the lambda deps; tracked in backlog #294 for a dep bump. Baselined
+# so the gate is usable now; it still hard-fails on any NEW CVE.
+CVE-2024-39338
+CVE-2025-27152
+CVE-2025-58754
+CVE-2025-7783
+CVE-2026-12143
+CVE-2026-25639
+CVE-2026-42033
+CVE-2026-42035
+CVE-2026-42043
+CVE-2026-42264
+CVE-2026-44486
+CVE-2026-44487
+CVE-2026-44492
+CVE-2026-44494
+CVE-2026-44495
+CVE-2026-44496

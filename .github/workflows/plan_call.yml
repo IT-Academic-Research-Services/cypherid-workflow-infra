@@ -1,4 +1,4 @@
-name: Terraform Plan Call
+name: Plan Call
 
 on:
   workflow_call:
@@ -17,14 +17,12 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  TERRAFORM_VERSION: "1.14.8"
 
 jobs:
   plan:
-    name: Terraform Plan
+    name: Plan
     environment: ${{ inputs.environment }}
     runs-on: ubuntu-latest
-    #permissions: write-all
     env:
       AWS_REGION: us-west-2
     outputs:
@@ -39,43 +37,42 @@ jobs:
         run: |
           git config --global url."https://github.com/".insteadOf ssh://git@github.com/
       - name: Install AWS CLI
-        uses: unfor19/install-aws-cli-action@v1
+        uses: unfor19/install-aws-cli-action@f5b46b7f32cf5e7ebd652656c5036bf83dd1e60c # v1
         with:
           version: 2
           verbose: false
           arch: amd64
       - name: Configure AWS Credentials
-        if: ${{ !env.ACT }}
         uses: aws-actions/configure-aws-credentials@v6.1.0
+        if: ${{ !env.ACT }}
         with:
           role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-executor
-          #output-credentials: true
           output-env-credentials: true
-          role-session-name: GitHub_to_AWS_via_FederatedOIDC
+          #role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
           aws-profile: idseq-${{ inputs.environment }}
       - name: Configure AWS Credentials for local execution using nektos act
-        if: ${{ env.ACT }}
         uses: aws-actions/configure-aws-credentials@v6.1.0
+        if: ${{ env.ACT }}
         with:
-          role-to-assume: czid-${{ inputs.environment }}-gh-actions-executor
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          #output-credentials: true
           output-env-credentials: true
-          role-session-name: GitHub_to_AWS_via_FederatedOIDC
+          #role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
           aws-profile: idseq-${{ inputs.environment }}
+      - name: Read Terraform version (SSOT = .terraform-version)
+        id: tfver
+        run: echo "version=$(cat .terraform-version)" >> "$GITHUB_OUTPUT"
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v4
+        uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_version: ${{ steps.tfver.outputs.version }}
           terraform_wrapper: false
-      - name: Terraform Plan
+      - name: Setup Terraform Environment
         # We manually create aws_config.json instead of using the 'init-tf' Makefile target, as that target also calls 'terraform init' without the '-upgrade' flag, which we need
         run: |
-          aws sts get-caller-identity --profile "idseq-${{ inputs.environment }}" --no-cli-pager --no-cli-auto-prompt
           set -x
           source "environment.${{ inputs.environment }}"
           set +x
@@ -83,8 +80,15 @@ jobs:
           mkdir -p "$TF_DATA_DIR"
           jq -n ".region=\"us-west-2\" | .bucket=env.TF_S3_BUCKET | .key=env.APP_NAME+env.DEPLOYMENT_ENVIRONMENT | .encrypt=true" > "$TF_DATA_DIR/aws_config.json"
           jq . "$TF_DATA_DIR/aws_config.json"
+      - name: Package Lambdas and create Templates
+        run: |
           make package-lambdas templates
-          terraform init -input=false -upgrade
+      - name: Terraform Plan
+        run: |
+          # No -upgrade: provider versions are pinned by the committed
+          # .terraform.lock.hcl so plans are reproducible and a malicious/broken
+          # provider release can't slip in between runs (CZID-30 / STATE-2).
+          terraform init -input=false
           echo "Plan will be created in: ${{ github.workspace }}/tf.plan"
           set +e
           terraform plan -input=false -detailed-exitcode -refresh=false -out="${{ github.workspace }}/tf.plan"
@@ -104,7 +108,7 @@ jobs:
       #    jq -cn '$ARGS.positional' --jsonargs '{"address": "foo", "action": "create"}' '{"address": "bar", "action": "update"}' '{"address": "baz", "action": "delete"}' > "${{ github.workspace }}/resource_changes.json"
       - name: Upload Plan as Artifact
         id: upload-plan
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: plan
           path: ${{ github.workspace }}/tf.plan
@@ -119,7 +123,7 @@ jobs:
             --arg artifact_name "plan" \
             --arg artifact_id "${{ steps.upload-plan.outputs.artifact-id }}" \
             --argjson change_count "$change_count" \
-            --argjson resource_changes $(<"${{ github.workspace }}/resource_changes.json") \
+            --argjson resource_changes "$(<"${{ github.workspace }}/resource_changes.json")" \
             '$ARGS.named' > "${{ github.workspace }}/result.json"
           jq . "${{ github.workspace }}/result.json"
       - name: Upload Result JSON as Artifact

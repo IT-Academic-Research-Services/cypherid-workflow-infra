@@ -1,0 +1,28 @@
+name: Terraform Validate
+
+# Thin caller of the SSOT reusable (thorvath-slower/seqtoid-ci-workflows) pinned @v1 — one definition,
+# updated once, used everywhere. This repo needs chalice lambda codegen + env sourcing before validate,
+# expressed via `prepare` + `validate_command`. Terraform version comes from .terraform-version.
+on:
+  pull_request:
+  push:
+    branches: [main, integration, development, staging, 'releases/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  validate:
+    uses: thorvath-slower/seqtoid-ci-workflows/.github/workflows/terraform-ci.yml@v1
+    with:
+      fmt_path: "."
+      # codegen (runs after fmt, before validate) — chalice lambda packaging + test env
+      prepare: "source ./environment.test && make package-lambdas"
+      # root-stack init+validate with env sourcing; clear the apply-only TF_CLI_ARGS so -backend=false wins
+      validate_command: "source ./environment.test && unset TF_CLI_ARGS_init TF_CLI_ARGS_output && terraform init -backend=false -input=false && terraform validate"
+      check_lockfile: true

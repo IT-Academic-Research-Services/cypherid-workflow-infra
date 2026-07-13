@@ -1,3 +1,26 @@
+# NOTE: the Lambda functions referenced below as
+#   aws_lambda_function.scan_logs_and_alert (main.tf) and
+#   aws_lambda_function.custom_invocation (outputs.tf)
+# are intentionally NOT declared in this .tf file. They are code-generated into
+# this module directory as chalice.tf.json by `make package-lambdas`
+# (scripts/package_lambda.py), which runs `chalice package --pkg-format terraform`
+# on the Chalice app in lambdas/cloudwatch-alerting/. Chalice registers each
+# handler as an aws_lambda_function resource keyed by its handler name, i.e.
+# aws_lambda_function.scan_logs_and_alert and aws_lambda_function.custom_invocation
+# (function_name "cloudwatch-alerting-<stage>-<handler>"). CI (validate.yml) and
+# the deploy/plan Make targets all run that codegen before terraform init/validate/apply,
+# so these references resolve at build time.
+#
+# Consequence: running `terraform validate` on this module WITHOUT first running
+# `make package-lambdas` reports "Reference to undeclared resource
+# aws_lambda_function ..." -- that is the missing codegen, NOT a bug in this
+# module. Do not "fix" it by repointing to data.aws_lambda_function lookups:
+# chalice.tf.json always emits these as managed resources in this same module,
+# so a data lookup would read a function that this apply is creating and fail on
+# first apply. The TF-vs-Chalice ownership boundary is: Chalice owns the Lambda
+# resources (via generated chalice.tf.json), this file owns the surrounding
+# CloudWatch/Secrets/SNS wiring.
+
 # in case some log groups don't exist when we apply we should create them
 #   this may happen if the log group doesn't exist because it has
 #   no entries yet

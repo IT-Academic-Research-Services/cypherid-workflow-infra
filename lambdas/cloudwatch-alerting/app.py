@@ -27,6 +27,13 @@ from slack_sdk import WebClient
 import boto3
 from chalice import Chalice
 from chalicelib import index_generation
+from chalicelib.sentry_init import init_sentry
+
+# Wire Sentry so unhandled Lambda errors reach the same Sentry project as the
+# Rails backend instead of dying silently in CloudWatch. Guarded so chalice
+# codegen/CLI mode does not init.
+if "AWS_CHALICE_CLI_MODE" not in os.environ:
+    init_sentry()
 
 # The Slack channel to send a message to stored in an environment variable attached to the Lambda
 SLACK_CHANNEL = os.environ["SLACK_CHANNEL"]

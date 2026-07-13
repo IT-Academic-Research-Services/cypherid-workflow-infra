@@ -14,6 +14,11 @@ env:
   AWS_REGION : us-west-2
   GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
   DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment }}
+  # CZID-40 (CICD-6): drive the CI identity from repo/org Actions variables so it is rotatable and
+  # not tied to a hardcoded account. Falls back to the current values if the vars are unset, so this
+  # is safe to merge before the Actions variables are configured.
+  CI_ACCOUNT_ID: ${{ vars.CI_ACCOUNT_ID || '941377154785' }}
+  GHA_ROLE: ${{ vars.GHA_ROLE || 'gha-seqtoid' }}
 
 permissions:
   id-token: write
@@ -22,13 +27,18 @@ permissions:
 jobs:
   DeployTerraform:
     runs-on: ubuntu-latest
+    # C4: gate the deploy by the GitHub Environment so prod requires the reviewer
+    # approval configured on the Environment (protection rules land with #81). Was
+    # ungated — an auto-approve `terraform apply` behind only a shell branch/account
+    # guard, with no environment: and no plan-linkage.
+    environment: ${{ inputs.environment }}
     steps:
       - name: Git clone the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: configure aws credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6.1.0
         with:
-          role-to-assume: arn:aws:iam::941377154785:role/gha-seqtoid
+          role-to-assume: arn:aws:iam::${{ env.CI_ACCOUNT_ID }}:role/${{ env.GHA_ROLE }}
           role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
       - name: Sts GetCallerIdentity

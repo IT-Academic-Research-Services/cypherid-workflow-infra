@@ -1,5 +1,7 @@
-PyMySQL~=1.2.0
-aws-lambda-powertools~=1.29.2
-boto3~=1.43.31
-chalice~=1.33.0
-opensearch-py~=3.2.0
+PyMySQL~=1.1.1
+aws-lambda-powertools~=2.43.0
+boto3~=1.35.0
+chalice~=1.33.0 
+opensearch-py~=2.6.0
+fastjsonschema~=2.21.2
+sentry-sdk~=2.64.0

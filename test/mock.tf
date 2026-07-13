@@ -1,11 +1,6 @@
-terraform {
-  required_version = ">= 0.12.16"
-  required_providers {
-    aws = {
-      version = "~> 4.54"
-    }
-  }
-}
+# required_version + required_providers come from versions.tf (symlinked to
+# ../versions.tf), the repo-wide SSOT - see CZID-169. No backend block here, so
+# the localstack mock stays on local state.
 
 provider "aws" {
   endpoints {

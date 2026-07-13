@@ -5,12 +5,11 @@
 # Generating a passwordless 2048-bit RSA PKCD #8 keypair:
 #   openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -nocrypt -out <NAME>.p8
 # Extracting the public key:
-#   openssl rsa -in <NAME>.p8 -pubout -out <NAME>.pub
+#   openssl rsa -in <NAME>.p8 -pubout -out <NAME>.pub 
 # Snowflake needs the private key to be unencrypted, so no real reason to generate it with an encryption pass phrase.
 # The keypair should probably be stored in 1Pass, or whatever secure location the team prefers.
 
-import os
-import sys
+import os, sys
 import snowflake.connector as sf
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import (
@@ -20,10 +19,10 @@ from cryptography.hazmat.primitives.serialization import (
     load_pem_private_key,
 )
 
-account = os.environ["SNOWFLAKE_ACCOUNT"]  # the subdomain before ".snowflakecomputing.com"
-user = os.environ["SNOWFLAKE_USER"]  # for production, we should create a service user...
-role = os.environ["SNOWFLAKE_ROLE"]  # ...and a minimally scoped role for that user
-private_key = os.environ["SNOWFLAKE_PRIVATE_KEY"]  # paste the whole PEM into github, headers/footers/line breaks included
+account = os.environ["SNOWFLAKE_ACCOUNT"] # the subdomain before ".snowflakecomputing.com"
+user = os.environ["SNOWFLAKE_USER"] # for production, we should create a service user...
+role = os.environ["SNOWFLAKE_ROLE"] # ...and a minimally scoped role for that user
+private_key = os.environ["SNOWFLAKE_PRIVATE_KEY"] # paste the whole PEM into github, headers/footers/line breaks included
 warehouse = os.environ["SNOWFLAKE_WAREHOUSE"]
 database = os.environ["SNOWFLAKE_DATABASE"]
 schema = os.environ["SNOWFLAKE_SCHEMA"]
@@ -76,9 +75,7 @@ if file == "dummy_data.csv":
 # Snowflake best practices: identifiers in double quotes are case-sensitive
 cursor.execute(f"USE DATABASE \"{database}\"")
 cursor.execute(f"USE SCHEMA \"{schema}\"")
-cursor.execute(
-    f"CREATE TABLE IF NOT EXISTS \"{table}\" (version string, index_version string, \"sample\" string, timestamp datetime, wall_seconds integer, NT_aupr float, NR_aupr float)"
-)
+cursor.execute(f"CREATE TABLE IF NOT EXISTS \"{table}\" (version string, index_version string, \"sample\" string, timestamp datetime, wall_seconds integer, NT_aupr float, NR_aupr float)")
 # there are table-scoped staging areas for Snowflake file-based imports: @"DATABASE"."SCHEMA".%"TABLE"/path
 cursor.execute(f"PUT file://./{file} @%\"{table}\"/{stage} OVERWRITE = TRUE")
 # import format options: https://docs.snowflake.com/en/sql-reference/sql/copy-into-table.html#format-type-options-formattypeoptions

@@ -5,9 +5,16 @@
 
 ----
 <!-- END -->
-# idseq
+# seqtoid — workflow infrastructure
 
-This is the central repository for IDseq infrastructure and service deployment instrumentation. The IDseq webapp
+> **Naming:** the platform is being renamed to **seqtoid** (this repo:
+> `cypherid-workflow-infra` → `seqtoid-workflow-infra`). The prose uses the
+> seqtoid name; **functional/upstream** references — external repo URLs
+> (`github.com/chanzuckerberg/idseq-*`, `czid-workflows`), the `idseq-*` AWS
+> resource/profile names, and the `idseq-swipe-*` module — keep the legacy
+> convention until a coordinated cutover, so they remain correct as written.
+
+This is the central repository for seqtoid infrastructure and service deployment instrumentation. The seqtoid webapp
 ([idseq-web](https://github.com/chanzuckerberg/idseq-web-private)) and public-facing components that can be reasonably
 expected to be reused outside the project, such as the [IDseq CLI](https://github.com/chanzuckerberg/idseq-cli-v2),
 are managed in separate repos. WDL files, which embody the logic that goes into the pipeline steps (but not the

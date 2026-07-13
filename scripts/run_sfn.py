@@ -120,7 +120,6 @@ def print_log_line(event):
         elif level in log_colors:
             return " " + log_colors[level] + level + ENDC()
         return level
-
     try:
         if "aws sts get-caller-identity" in event["message"]:
             return
@@ -219,10 +218,8 @@ if args.stages is None:
         args.stages = ["run"]
 
 if args.sfn_arn is None:
-    args.sfn_arn = str(ARN(
-        service="states",
-        resource=f"stateMachine:idseq-swipe-{os.environ['DEPLOYMENT_ENVIRONMENT']}-{args.sfn_name}-wdl"
-    ))
+    args.sfn_arn = str(ARN(service="states",
+                           resource=f"stateMachine:idseq-swipe-{os.environ['DEPLOYMENT_ENVIRONMENT']}-{args.sfn_name}-wdl"))
 
 if args.workflow_version is None:
     github_api = "https://api.github.com"
@@ -332,9 +329,9 @@ def deep_merge(source, destination):
             destination[key] = value
 
     return destination
-
-
+    
 sfn_input = deep_merge(args.sfn_input, default_sfn_input)
+
 
 if fastqs:
     stage_key = list(sfn_input["Input"].keys())[0]

@@ -1,28 +1,31 @@
-name: Run Check
-run-name: Run Check on branch ${{ github.ref_name }} by ${{ github.actor }}
+name: idseq-web check
 
 on:
+  # CZID-204 — the Python flake8 lint is a no-AWS gate, so run it automatically on PRs (and on the
+  # protected branches post-merge), matching validate.yml. Plan/deploy stay manual (they need AWS OIDC).
   push:
+    branches:
+      - development
+      - staging
+      - main
+      - 'releases/**'
+  pull_request:
+    branches:
+      - development
+      - staging
+      - main
+      - 'releases/**'
   workflow_dispatch:
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}
-  cancel-in-progress: true
-
-permissions: #write-all
-  id-token: write
-  contents: read
-
 jobs:
-  check-python:
+  python:
     name: Check Python
     runs-on: ubuntu-latest
-    permissions: write-all
     steps:
       - name: Git clone the repository
         uses: actions/checkout@v6
         with:
-          persist-credentials: true
+          persist-credentials: false
       - name: Cache Python Dependencies
         uses: actions/cache@v5
         with:
@@ -32,16 +35,18 @@ jobs:
             ${{ runner.os }}-pip
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.9' # TODO: 3.8?
+          python-version-file: .python-version
           cache: pip
           #pip-version:
           pip-install: -r requirements-dev.txt
       - name: Run flake8
-        uses: julianwachholz/flake8-action@v2.0.2
+        # Our modernized flake8-action (upstream julianwachholz is node16/EOL), now living in
+        # thorvath-slower/seqtoid-ci-workflows (collapsed in from the standalone flake8-action repo).
+        # Pinned to the seqtoid-ci-workflows @v1 moving major tag (SSOT: update once, propagates). See CZID-204 / #405 / #406.
+        uses: thorvath-slower/seqtoid-ci-workflows/flake8-action@v1
         with:
-          checkName: 'check-python' # NOTE: this needs to be the same as the job name
-          #plugins: flake8-spellcheck
+          checkName: "Python Lint"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      #- name: Test # TODO: need to setup localstack
-      #  run: python3 -m unittest discover -v -s test/ -p 'test_*.py'
+#      - name: Test # TODO: need to setup localstack
+#        run: python3 -m unittest discover -v -s test/ -p 'test_*.py'
