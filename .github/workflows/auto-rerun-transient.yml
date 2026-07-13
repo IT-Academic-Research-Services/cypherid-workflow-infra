@@ -1,0 +1,91 @@
+name: auto-rerun-transient
+
+# Autonomously re-run a workflow that failed on a TRANSIENT GitHub-infra hiccup
+# (runner "Service Unavailable" / deprovision at job setup, registry or network 5xx,
+# DNS/TLS blips, docker-daemon-not-ready) rather than a real code / test / security
+# failure. These transient runner failures are frequent and otherwise need a human to
+# hit `gh run rerun`.
+#
+# How it works: chained off this repo's CI/CD workflows via workflow_run(completed).
+# If the run FAILED, is under the retry cap, AND its failed-job logs match a known
+# transient signature (or it died at job setup with no real step output), it re-runs
+# only the failed jobs after a short backoff. Real failures (rspec, tsc, rubocop,
+# brakeman, trivy CVE, terraform error, cargo test, npm ERR) do NOT match and are left
+# failed. Bounded by run_attempt so it can never loop. See platform-overhaul #678.
+
+on:
+  workflow_run:
+    workflows:
+      - "actionlint"
+      - "idseq-web check"
+      - "lambda unit tests"
+      - "Plan Call"
+      - "Plan only"
+      - "Promote integration -> main"
+      - "security"
+      - "terraform-lock"
+      - "Terraform Validate"
+    types:
+      - completed
+
+# Only need to re-run jobs in this repo's Actions.
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: auto-rerun-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  rerun:
+    # Only on a FAILED run, still under the retry cap (attempt 1 + up to 2 retries).
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'failure' &&
+          github.event.workflow_run.run_attempt < 3 }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Classify failure and re-run if transient
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          WF_NAME: ${{ github.event.workflow_run.name }}
+          ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          BACKOFF_SECONDS: "30"
+        run: |
+          set -euo pipefail
+          echo "Workflow '${WF_NAME}' run ${RUN_ID} failed (attempt ${ATTEMPT}). Classifying transient vs real..."
+
+          # Best-effort pull of the failed-job logs.
+          log="$(gh run view "${RUN_ID}" --repo "${GITHUB_REPOSITORY}" --log-failed 2>/dev/null || true)"
+
+          # Known TRANSIENT signatures (GitHub / registry / network infra -- not our code).
+          transient_re='Service Unavailable|received a shutdown signal|deprovision|The runner has|Failed to initialize|no space left on device|ECONNRESET|ETIMEDOUT|i/o timeout|connection reset|could not resolve host|Temporary failure in name resolution|TLS handshake timeout|GnuTLS recv error|unexpected EOF|502 Bad Gateway|503 Service|504 Gateway|Cannot connect to the Docker daemon|docker daemon|context deadline exceeded|network is unreachable|The operation was canceled|toomanyrequests|rate limit|429 Too Many|EOF$'
+
+          # REAL-failure signatures -- if present, DO NOT retry (let it fail).
+          real_re='[0-9]+ examples?, [0-9]+ failures?|error TS[0-9]|Offenses:|rubocop|brakeman|Vulnerabilit|Trivy|npm ERR!|rspec \./|SyntaxError|AssertionError|FAILED \(|Error: Terraform|test result: FAILED|cargo test'
+
+          is_transient=false
+          if printf '%s' "${log}" | grep -qiE "${transient_re}"; then
+            is_transient=true
+          fi
+          # A setup / provisioning failure typically leaves ~empty failed-step logs -> transient.
+          stripped="$(printf '%s' "${log}" | tr -d '[:space:]')"
+          if [ -z "${stripped}" ]; then
+            is_transient=true
+          fi
+          # An explicit real failure always wins.
+          if printf '%s' "${log}" | grep -qiE "${real_re}"; then
+            is_transient=false
+          fi
+
+          if [ "${is_transient}" != "true" ]; then
+            echo "::notice::'${WF_NAME}' run ${RUN_ID} looks like a REAL failure -- not re-running."
+            echo "- **${WF_NAME}** run ${RUN_ID}: real failure, left failed (no auto-retry)." >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          echo "::notice::Transient failure in '${WF_NAME}' run ${RUN_ID} (attempt ${ATTEMPT}) -> re-running failed jobs after ${BACKOFF_SECONDS}s."
+          sleep "${BACKOFF_SECONDS}"
+          gh run rerun "${RUN_ID}" --repo "${GITHUB_REPOSITORY}" --failed
+          echo "- **${WF_NAME}** run ${RUN_ID}: transient failure, auto-re-ran failed jobs (was attempt ${ATTEMPT})." >> "${GITHUB_STEP_SUMMARY}"
