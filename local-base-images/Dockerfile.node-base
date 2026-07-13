@@ -1,10 +1,11 @@
-FROM public.ecr.aws/lambda/nodejs:18
+FROM public.ecr.aws/lambda/nodejs:20
 
 # Copy and unzip pre-packaged code/dependencies into the working directory.
-# `yum clean all` + rm of the cache clears DS-0015 and shrinks the layer.
-RUN yum install unzip -y \
-    && yum clean all \
-    && rm -rf /var/cache/yum
+# The nodejs:20 base is Amazon Linux 2023, which ships dnf (not yum).
+# `dnf clean all` + rm of the cache clears DS-0015 and shrinks the layer.
+RUN dnf install unzip -y \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
 COPY deployment.zip ${LAMBDA_TASK_ROOT}
 RUN unzip ${LAMBDA_TASK_ROOT}/deployment.zip -d ${LAMBDA_TASK_ROOT}
 
