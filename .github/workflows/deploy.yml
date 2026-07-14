@@ -14,11 +14,6 @@ env:
   AWS_REGION : us-west-2
   GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
   DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment }}
-  # CZID-40 (CICD-6): drive the CI identity from repo/org Actions variables so it is rotatable and
-  # not tied to a hardcoded account. Falls back to the current values if the vars are unset, so this
-  # is safe to merge before the Actions variables are configured.
-  CI_ACCOUNT_ID: ${{ vars.CI_ACCOUNT_ID || '941377154785' }}
-  GHA_ROLE: ${{ vars.GHA_ROLE || 'gha-seqtoid' }}
 
 permissions:
   id-token: write
@@ -38,7 +33,12 @@ jobs:
       - name: configure aws credentials
         uses: aws-actions/configure-aws-credentials@v6.1.0
         with:
-          role-to-assume: arn:aws:iam::${{ env.CI_ACCOUNT_ID }}:role/${{ env.GHA_ROLE }}
+          # Per-env least-privilege apply role in the TARGET account -- the same identity our
+          # terraform plan/apply and web-infra deploys use, whose czid_ci_cd policy authorizes
+          # batch/states/lambda/ecr/s3. Replaces the shared idseq-support gha-seqtoid role. The
+          # apply role is trusted only from refs/heads/main, which is the workflow_dispatch
+          # default ref. CZID-40 (CICD-6) / CZID-81.
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-apply
           role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
       - name: Sts GetCallerIdentity
