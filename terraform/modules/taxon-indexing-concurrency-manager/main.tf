@@ -70,7 +70,7 @@ resource "aws_cloudwatch_log_group" "taxon_indexing_concurrency_manager" {
 
 resource "aws_lambda_function" "taxon_indexing_concurrency_manager" {
   function_name    = "taxon-indexing-concurrency-manager-${var.deployment_environment}"
-  runtime          = "nodejs16.x"
+  runtime          = "nodejs20.x"
   handler          = "app.handler"
   memory_size      = 512
   timeout          = 900
