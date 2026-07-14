@@ -2,7 +2,7 @@ module "swipe" {
   # TODO: Use chanzuckerberg/swipe once they merge in PR https://github.com/chanzuckerberg/swipe/pull/124
   #       But don't hold your breath. That repo hasn't been updated since April 2025
   # source = "github.com/chanzuckerberg/swipe?ref=v1.4.9"
-  source = "github.com/jsims-slower/swipe"
+  source = "github.com/IT-Academic-Research-Services/swipe?ref=v1.5.1"
   tags = {
     Name = "swipe"
   }
