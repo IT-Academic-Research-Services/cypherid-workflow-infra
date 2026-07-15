@@ -18,7 +18,7 @@ plan: package-lambdas templates init-tf
 	terraform plan
 
 templates:
-	for sfn_tpl in terraform/sfn_templates/*.yml; do yq . $$sfn_tpl > $${sfn_tpl/.yml/.json}; done
+	for sfn_tpl in terraform/sfn_templates/*.yml; do yq . $$sfn_tpl -o json > $${sfn_tpl/.yml/.json}; done
 	if [[ $(DEPLOYMENT_ENVIRONMENT) == test ]]; then sed -i '/Memory/ d' terraform/sfn_templates/*.json; fi
 
 $(TFSTATE_FILE):
