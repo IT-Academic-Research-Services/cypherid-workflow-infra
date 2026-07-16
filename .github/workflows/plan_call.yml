@@ -90,6 +90,23 @@ jobs:
           mkdir -p "$TF_DATA_DIR"
           jq -n ".region=\"us-west-2\" | .bucket=env.TF_S3_BUCKET | .key=env.APP_NAME+env.DEPLOYMENT_ENVIRONMENT | .encrypt=true" > "$TF_DATA_DIR/aws_config.json"
           jq . "$TF_DATA_DIR/aws_config.json"
+
+          # Hand the sourced environment to the LATER steps. Every `run:` block is its own shell,
+          # so nothing `environment.<env>` exports survives past this step -- which made this step a
+          # no-op for everything downstream and meant this workflow could never have completed a
+          # plan. `make` tripped its own DEPLOYMENT_ENVIRONMENT guard first ("Please run source
+          # environment..."), and had it not, `terraform init` would have failed next with no
+          # TF_CLI_ARGS_init to point it at the S3 backend.
+          #
+          # Only the variables `environment` derives are forwarded. AWS credentials are NOT included:
+          # configure-aws-credentials already publishes those, and $GITHUB_ENV is plain text in the
+          # runner log.
+          for v in APP_HOME APP_NAME DEPLOYMENT_ENVIRONMENT TF_DATA_DIR TFSTATE_FILE \
+                   TF_CLI_ARGS_init TF_CLI_ARGS_output AWS_SDK_LOAD_CONFIG AWS_DEFAULT_REGION \
+                   AWS_ACCOUNT_ID AWS_ACCOUNT_ALIAS TF_S3_BUCKET DOCKER_REGISTRY \
+                   OWNER TF_VAR_owner TF_VAR_environment; do
+            printf '%s=%s\n' "$v" "${!v}" >> "$GITHUB_ENV"
+          done
       - name: Package Lambdas and create Templates
         run: |
           make package-lambdas templates
