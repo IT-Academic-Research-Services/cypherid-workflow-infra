@@ -1,8 +1,25 @@
 module "swipe" {
-  source = "github.com/IT-Academic-Research-Services/swipe?ref=v1.5.2"
+  source = "github.com/IT-Academic-Research-Services/swipe?ref=v1.5.3"
   tags = {
     Name = "swipe"
   }
+
+  restricted_files = [
+    ".*bowtie2_ercc_filtered\\d+\\.fastq$",
+    ".*bowtie2_host\\.bam$",
+    ".*bowtie2_host_filtered\\d+\\.fastq$",
+    ".*bowtie2_human_filtered\\d+\\.fastq$",
+    ".*fastp\\d+\\.fastq$",
+    ".*hisat2_host_filtered\\d+\\.fastq$",
+    ".*sample_quality_filtered\\.fastq$",
+    ".*sample_validated\\.fastq$",
+    ".*sample\\.hostfiltered\\.bam$",
+    ".*sample\\.hostfiltered\\.fastq$",
+    ".*sample\\.humanfiltered\\.bam$",
+    ".*sample\\.humanfiltered\\.fastq$",
+    ".*valid_input\\d+\\.fastq$",
+    ".*validated_\\d+\\.fastq\\.gz$",
+  ]
 
   app_name        = "idseq-swipe-${var.DEPLOYMENT_ENVIRONMENT}"
   job_policy_arns = [aws_iam_policy.idseq_batch_main_job.arn, "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"]
