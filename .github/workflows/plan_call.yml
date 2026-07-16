@@ -118,7 +118,25 @@ jobs:
           terraform init -input=false
           echo "Plan will be created in: ${{ github.workspace }}/tf.plan"
           set +e
-          terraform plan -input=false -detailed-exitcode -refresh=false -out="${{ github.workspace }}/tf.plan"
+          # -lock=false: this backend uses S3-native lockfile locking (use_lockfile = true), so
+          # acquiring a lock means PutObject on <bucket>/idseqdev.tflock. The plan role is
+          # read-only by design and cannot write it:
+          #
+          #   Error acquiring the state lock ... czid-dev-gh-actions-plan is not authorized to
+          #   perform: s3:PutObject on "tfstate-491013321714-test/idseqdev.tflock"
+          #
+          # A plan writes no state, so it needs no lock. The apply path keeps locking -- it runs as
+          # the apply role, which holds tfstate read/write.
+          #
+          # Refresh is deliberately ON. With -refresh=false terraform compares config against the
+          # STATE FILE rather than against AWS, so the diff omits anything that drifted out of band
+          # and a clean plan proves nothing about the real account. The apply this plan gates
+          # (`make deploy` -> `terraform apply`) DOES refresh, so a -refresh=false plan can and does
+          # understate what the apply will do -- the plan stops being a review of the apply.
+          # Refreshing only reads AWS (covered by the plan role's ReadOnlyAccess) and is held in
+          # memory; `terraform plan` never persists refreshed state, which is also why dropping the
+          # lock above stays safe.
+          terraform plan -input=false -detailed-exitcode -lock=false -out="${{ github.workspace }}/tf.plan"
           exitcode=$?
           echo "Terraform exited with exit-code $exitcode"
           if [[ $exitcode -eq 1 ]]; then
