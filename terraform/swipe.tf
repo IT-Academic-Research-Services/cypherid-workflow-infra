@@ -90,12 +90,36 @@ module "swipe" {
   #       czid-public-references -> seqtoid-public-references or wherever the public data lives
   #       idseq-workflows -> cypherid-samples-deleteme -> seqtoid-workflows or wherever the WDL files live
   #       idseq-database -> Is this supposed to be the same as idseq-workflows or seqtoid-public-references, or some other component?
+  # Per-PR preview sandboxes upload to their OWN bucket (seqtoid-preview-samples-<env>-<acct>,
+  # cypherid-web-infra), not idseq-samples-<env>. They were given a separate bucket so a sandbox can
+  # never write into `seqtoid-sandbox` -- which despite the name holds ~4.8 TB of the team's research
+  # data (validation sets, time trials, taxon indexes) and which the preview role could previously
+  # DELETE from.
+  #
+  # But THIS pipeline was never told that bucket exists, so a sandbox's Step Functions execution died
+  # 1.4s in at the first state:
+  #   PreprocessInput -> AccessDenied: idseq-swipe-dev-preprocess_input is not authorized to perform
+  #   s3:PutObject on seqtoid-preview-samples-dev-.../samples/1/1/1/short-read-mngs-8/host_filter_input.json
+  # The sandbox could dispatch, but the pipeline could not read its inputs or write its outputs --
+  # leaving the sandbox usable for UI review only, never for running a sample.
+  #
+  # This list is the ONLY feed for those grants: swipe expands it into the sfn-io-helper lambda role
+  # policies (one shared document, for_each over 8 lambdas) and the batch-job policy. Same actions,
+  # same bucket-wide scope as idseq-samples-<env> already has -- it is not a broader grant, just the
+  # same one for the bucket sandboxes actually use.
+  #
+  # DEV ONLY, deliberately. The lookup's default arm is shared by dev, staging, sandbox AND test
+  # (only prod has its own), so appending unconditionally would grant this in staging and sandbox
+  # too. Preview sandboxes exist only on dev; the bucket does not exist elsewhere.
   workspace_s3_prefixes = lookup(
     {
       "prod" : ["idseq-prod-samples-us-west-2", "czid-public-references", local.s3_bucket_public_references, local.s3_bucket_workflows, "idseq-prod-system-test"],
     },
     var.DEPLOYMENT_ENVIRONMENT,
-    ["idseq-samples-${var.DEPLOYMENT_ENVIRONMENT}-${var.AWS_ACCOUNT_ID}", "czid-public-references", local.s3_bucket_public_references, local.s3_bucket_workflows]
+    concat(
+      ["idseq-samples-${var.DEPLOYMENT_ENVIRONMENT}-${var.AWS_ACCOUNT_ID}", "czid-public-references", local.s3_bucket_public_references, local.s3_bucket_workflows],
+      var.DEPLOYMENT_ENVIRONMENT == "dev" ? ["seqtoid-preview-samples-dev-${var.AWS_ACCOUNT_ID}"] : []
+    )
   )
 
   extra_env_vars = {
