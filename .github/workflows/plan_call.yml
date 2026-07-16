@@ -7,6 +7,14 @@ on:
         description: Both Github Environment and AWS Environment
         type: string
         required: true
+      targets:
+        description: >-
+          Optional space-separated terraform resource addresses. When set, the plan is limited to
+          these (-target) instead of the whole configuration. Use to review a narrow change against
+          a state that carries unrelated pending drift; leave empty for the full plan.
+        type: string
+        required: false
+        default: ''
     outputs:
       plan-artifact-id:
         description: The Artifact ID of the generated Terraform Plan
@@ -136,7 +144,17 @@ jobs:
           # Refreshing only reads AWS (covered by the plan role's ReadOnlyAccess) and is held in
           # memory; `terraform plan` never persists refreshed state, which is also why dropping the
           # lock above stays safe.
-          terraform plan -input=false -detailed-exitcode -lock=false -out="${{ github.workspace }}/tf.plan"
+          # Optional -target scoping. Empty (the default) plans the whole configuration.
+          targets=()
+          for t in ${{ inputs.targets }}; do
+            targets+=("-target=$t")
+          done
+          if [[ ${#targets[@]} -gt 0 ]]; then
+            echo "NOTE: plan is scoped to ${#targets[@]} target(s); it does NOT show the full diff."
+            printf '  %s\n' "${targets[@]}"
+          fi
+
+          terraform plan -input=false -detailed-exitcode -lock=false "${targets[@]}" -out="${{ github.workspace }}/tf.plan"
           exitcode=$?
           echo "Terraform exited with exit-code $exitcode"
           if [[ $exitcode -eq 1 ]]; then
