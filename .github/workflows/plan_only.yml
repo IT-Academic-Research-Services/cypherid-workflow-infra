@@ -13,6 +13,13 @@ on:
         required: true
         type: environment
         default: dev
+      targets:
+        description: >-
+          Optional space-separated terraform addresses to limit the plan to (-target). Leave empty
+          for the full plan.
+        required: false
+        type: string
+        default: ''
 
 env:
   branch_name: ${{ github.base_ref || github.ref_name }}
@@ -67,6 +74,7 @@ jobs:
     uses: ./.github/workflows/plan_call.yml
     with:
       environment: ${{ needs.should-plan.outputs.environment }}
+      targets: ${{ inputs.targets }}
     secrets: inherit
 
   plan-summary:
