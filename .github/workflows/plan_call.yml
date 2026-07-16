@@ -46,7 +46,17 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v6.1.0
         if: ${{ !env.ACT }}
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-executor
+          # The read-only plan role, NOT the legacy `-gh-actions-executor`. The executor was
+          # retained only until workflows cut over to the split plan/apply roles; the apply paths
+          # here (deploy.yml, publish-workflows.yml) were cut over and this one was missed, so it
+          # still assumed a role that has no policy attachments at all. The first thing that failed
+          # was the account-alias guard in `environment`: PowerUserAccess/executor cannot call
+          # iam:ListAccountAliases, the guard read an empty alias, refused to continue, and unset
+          # TF_DATA_DIR -- surfacing as `mkdir: cannot create directory ''`, which names neither the
+          # role nor the denial. The plan role carries ReadOnlyAccess (which does allow
+          # ListAccountAliases) plus scoped tfstate read, and its subject_ref_pattern is `*`, so the
+          # `environment:<env>` OIDC subject this job presents is accepted.
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-plan
           output-env-credentials: true
           #role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
