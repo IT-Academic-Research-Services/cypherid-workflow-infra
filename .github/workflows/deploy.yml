@@ -52,6 +52,18 @@ jobs:
           role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-apply
           role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
+          # aws-profile is load-bearing, not tidiness. `environment` derives the region with
+          #   AWS_DEFAULT_REGION=$(aws configure get region)
+          # which reads the profile CONFIG FILE, not the aws-region input above and not the
+          # AWS_DEFAULT_REGION that init_ci_runner.sh already exported. Without a profile written to
+          # disk that command returns empty and the assignment silently overwrites a correct region
+          # with nothing:
+          #   +++++ aws configure get region
+          #   ++++ AWS_DEFAULT_REGION=
+          # Every later AWS call then runs with no region. plan_call.yml sets aws-profile, which is
+          # why the plan path works and this one did not.
+          aws-profile: idseq-${{ inputs.environment }}
+          output-env-credentials: true
       - name: Sts GetCallerIdentity
         run: |
           aws sts get-caller-identity
