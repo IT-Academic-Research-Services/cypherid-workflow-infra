@@ -32,5 +32,6 @@ module "taxon-indexing-concurrency-manager" {
 }
 
 module "taxon-indexing-eviction" {
-  source = "./modules/taxon-indexing-eviction"
+  source                 = "./modules/taxon-indexing-eviction"
+  deployment_environment = var.DEPLOYMENT_ENVIRONMENT
 }
