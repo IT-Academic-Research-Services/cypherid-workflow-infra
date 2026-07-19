@@ -61,6 +61,18 @@ resource "aws_iam_role_policy" "taxon_indexing_concurrency_manager_role" {
 # for bounded retention + encryption-at-rest instead of the implicit, never-expiring group
 # Lambda auto-creates. Created before the function (depends_on) so it writes into this group.
 # In an env where the implicit group already exists, import it once before the first apply.
+#
+# TEMPORARY (dev state adoption): dev's group was auto-created by Lambda (no retention, no KMS)
+# before this resource existed, so a plain apply hits ResourceAlreadyExistsException. This import
+# block adopts the existing group into state so the apply RECONCILES it (adds retention + the
+# workflows CMK) instead of trying to create it. Remove this block immediately after the dev apply
+# runs once. Only dev has this lambda deployed today; do NOT deploy the concurrency-manager to
+# staging/prod while this block is present -- the per-env id would not resolve there.
+import {
+  to = aws_cloudwatch_log_group.taxon_indexing_concurrency_manager
+  id = "/aws/lambda/taxon-indexing-concurrency-manager-${var.deployment_environment}"
+}
+
 resource "aws_cloudwatch_log_group" "taxon_indexing_concurrency_manager" {
   #checkov:skip=CKV_AWS_338:90-day retention (var.log_retention_in_days) is the deliberate cost/policy choice for this lambda log group; CKV_AWS_338 wants >=1 year. Logs are KMS-encrypted via the workflows CMK (var.log_kms_key_arn).
   name              = "/aws/lambda/taxon-indexing-concurrency-manager-${var.deployment_environment}"
