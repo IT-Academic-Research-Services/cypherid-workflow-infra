@@ -76,8 +76,9 @@ resource "aws_security_group" "taxon_indexing" {
   # chalice's interpolated string into the aws_lambda_function.index_taxons vpc_config block.
   count = var.deployment_environment == "test" ? 0 : 1
 
-  name        = "taxon-indexing-lambda-${var.deployment_environment}"
-  description = "Egress for the taxon-indexing Lambda's VPC ENIs (heatmap ES over 443, RDS over 3306)."
+  name = "taxon-indexing-lambda-${var.deployment_environment}"
+  # NOTE: no apostrophe -- AWS SG descriptions reject "'" (allowed set is a-zA-Z0-9. _-:/()#,@[]+=&;{}!$*).
+  description = "Egress for the taxon-indexing Lambda VPC ENIs (heatmap ES over 443, RDS over 3306)."
   vpc_id      = data.aws_vpc.webservice_vpc[0].id
 
   egress {
