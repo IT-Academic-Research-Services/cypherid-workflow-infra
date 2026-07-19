@@ -16,7 +16,7 @@ let {
 CONCURRENCY = parseInt(CONCURRENCY) || 50
 const DEFAULT_ES_BATCHSIZE = 1000
 
-async function invoke_taxon_indexing(pipeline_run_ids, background_id, concurrency, es_batchsize) {
+async function invoke_taxon_indexing(pipeline_run_ids, background_id, concurrency, es_batchsize, es_host) {
     const limit = pLimit(concurrency);
 
     const result = await Promise.all(
@@ -27,7 +27,11 @@ async function invoke_taxon_indexing(pipeline_run_ids, background_id, concurrenc
                         pipeline_run_id,
                         background_id,
                         es_batchsize,
-                        concurrency
+                        concurrency,
+                        // Forward the caller's target OpenSearch host to each worker so a preview
+                        // sandbox's indexing lands in its isolated sandbox domain. Undefined for
+                        // dev/staging/prod -> JSON.stringify drops it -> worker uses its own host.
+                        es_host
                     }).catch(
                         (error) => {
                             if (!(error instanceof TooManyRequestsException)) {
@@ -77,6 +81,7 @@ export const handler = async (event, context) => {
     const background_id = event.background_id
     const concurrency = event.concurrency || CONCURRENCY
     const es_batchsize = event.es_batchsize || DEFAULT_ES_BATCHSIZE
+    const es_host = event.es_host
 
-    return invoke_taxon_indexing(pipeline_run_ids, background_id, concurrency, es_batchsize)
+    return invoke_taxon_indexing(pipeline_run_ids, background_id, concurrency, es_batchsize, es_host)
   }
