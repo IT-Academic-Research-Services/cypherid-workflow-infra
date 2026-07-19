@@ -26,9 +26,8 @@ module "taxon-indexing-concurrency-manager" {
   deployment_environment  = var.DEPLOYMENT_ENVIRONMENT
   index_taxon_lambda_arn  = module.taxon-indexing.lambda_arn
   index_taxon_lambda_name = module.taxon-indexing.lambda_name
-  # CZID-63: bound log retention + encrypt the lambda log group with the workflows CMK.
-  log_retention_in_days = var.lambda_log_retention_in_days
-  log_kms_key_arn       = aws_kms_key.workflows.arn
+  # CZID-63 log-group inputs (log_retention_in_days / log_kms_key_arn) removed with the managed log
+  # group resource -- see the follow-up note in the module's main.tf. Restore when re-adopted.
 }
 
 module "taxon-indexing-eviction" {
