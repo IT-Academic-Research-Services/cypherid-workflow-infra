@@ -1,8 +1,43 @@
+# Per-account reference bucket name (generate-once -> replicate prerequisite).
+#
+# The reference (NT/NR taxon index) bucket used to be a single, hardcoded,
+# globally-unique name "seqtoid-public-references". A global-unique S3 name can
+# exist in exactly ONE account, so it collides with the program rule that each
+# env is self-sufficient in its OWN account (no cross-account providers, no one
+# shared bucket read across accounts). To replicate byte-identical index
+# artifacts INTO each env, every env needs its own uniquely-named reference
+# bucket -- mirroring how s3_bucket_workflows is already per-account.
+#
+# This variable lets each env supply its own name WITHOUT breaking the live dev
+# path: the default is empty, which resolves to the legacy global name below, so
+# a `terraform plan` with the var unset is byte-identical to before (no drift,
+# nothing destroyed). Envs migrate one at a time by (1) creating + seeding their
+# own bucket out-of-band, (2) setting this var to that name, (3) applying. See
+# LEVER1-GENERATE-ONCE-REPLICATE-DESIGN.md for the full migration + replication
+# flow. NOTE: index-generation.tf still hardcodes the legacy ARN in one IAM
+# statement; that must be repointed to this local as part of the same migration
+# (tracked separately -- that file is owned by the CE spot-params change).
+variable "PUBLIC_REFERENCES_BUCKET_NAME" {
+  description = "Override for the per-account reference (taxon index) bucket name. Empty (default) resolves to the legacy global name 'seqtoid-public-references' so existing envs are unchanged. Per-account envs should set this to a unique name, recommended 'seqtoid-public-references-<env>-<account-id>'."
+  type        = string
+  default     = ""
+}
+
 locals {
   # TODO: Where else to put these, possibly env-specific, configurations?
   # s3_bucket_workflows         = "cypherid-samples-deleteme"
-  s3_bucket_workflows         = "seqtoid-workflows-${var.DEPLOYMENT_ENVIRONMENT}-${var.AWS_ACCOUNT_ID}"
-  s3_bucket_public_references = "seqtoid-public-references"
+  s3_bucket_workflows = "seqtoid-workflows-${var.DEPLOYMENT_ENVIRONMENT}-${var.AWS_ACCOUNT_ID}"
+
+  # Recommended per-account name for envs that adopt their own reference bucket.
+  # Not applied automatically (that would change the live data-source lookup and
+  # break the current shared bucket); an env opts in by setting
+  # var.PUBLIC_REFERENCES_BUCKET_NAME. Kept here as the canonical pattern so all
+  # envs converge on the same shape once migrated.
+  s3_bucket_public_references_per_account = "seqtoid-public-references-${var.DEPLOYMENT_ENVIRONMENT}-${var.AWS_ACCOUNT_ID}"
+
+  # Effective name: explicit override wins; otherwise the legacy global name so
+  # the current dev/staging/prod path is unchanged (byte-identical plan).
+  s3_bucket_public_references = var.PUBLIC_REFERENCES_BUCKET_NAME != "" ? var.PUBLIC_REFERENCES_BUCKET_NAME : "seqtoid-public-references"
 
   # DATA-1 (CZID-31): allow terraform to destroy data resources only in throwaway envs;
   # protect the shared/long-lived envs (staging/prod) from a silent destroy/replace data loss.
@@ -10,7 +45,11 @@ locals {
 }
 
 # TODO: Create one bucket per environment? Or one bucket per version?
-#  Either way, we need to have the bucket owned by Terraform in some Environment; currently it's manually created and managed
+#  Either way, we need to have the bucket owned by Terraform in some Environment; currently it's manually created and managed.
+#  This stays a data source (not a TF-owned resource) on purpose: the reference
+#  bucket is large and live, and converting it to a managed resource risks a
+#  destroy/recreate of many TB of taxon indexes. Per-account TF ownership is a
+#  later, deliberately-scoped apply (see LEVER1-GENERATE-ONCE-REPLICATE-DESIGN.md).
 data "aws_s3_bucket" "public-references" {
   bucket = local.s3_bucket_public_references
 }
