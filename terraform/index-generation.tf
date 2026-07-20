@@ -113,7 +113,15 @@ resource "aws_launch_template" "index_generation_launch_template" {
     content {
       device_name = "/dev/sd${block_device_mappings.key}"
       ebs {
-        volume_size           = 16384 # size in GB, maximum size for EBS volume
+        # Lever 1 (platform-overhaul 548): scratch right-sized 64 TB -> ~4 TB.
+        # index_generation_instance_user_data RAID0s every /dev/sd? volume into a single /mnt
+        # (Docker data-root). Previously 4 x 16384 GB (16 TB) = 64 TB of gp3 that, per the cost
+        # brief, cost more per hour (~$7.2) than the instance itself. With PR-1's per-task disk
+        # declarations (seqtoid-workflows #16) each phase keeps only its own working set (~4 TB),
+        # so 4 x 1024 GB (1 TB) = ~4 TB RAID0 is sufficient. Keeping four devices preserves the
+        # RAID0 striping/throughput the user-data script expects. gp3 defaults (3000 IOPS /
+        # 125 MB/s per volume) are unchanged; RAID0 across four volumes still parallelizes I/O.
+        volume_size           = 1024 # GB; 4 devices x 1024 = ~4 TB scratch (was 16384 = 64 TB)
         encrypted             = true
         delete_on_termination = true
       }
@@ -127,12 +135,34 @@ resource "aws_batch_compute_environment" "index_generation_compute_environment" 
   compute_resources {
     instance_role = aws_iam_instance_profile.idseq_batch_main.arn
 
-    /** The i3.16xlarge series was selected because index generation requires a lot of memory,
-      * of fast storage for scratch space, and a lot of bandwidth for downloading
-      * source files and uploading indexes. i3.16xlarge instances have decent bandwidth, NVME
-      * memory, and high storage.
-      */
-    instance_type = var.DEPLOYMENT_ENVIRONMENT == "test" ? ["optimal"] : ["r5n.24xlarge"]
+    # Lever 1 (platform-overhaul 548): right-size the box index generation lands on.
+    #
+    # History: a single fixed r5n.24xlarge (96 vCPU / 768 GB) was used because the run needs a lot
+    # of memory, fast RAID0 scratch, and download/upload bandwidth. But index generation runs as ONE
+    # monolithic Batch job (the SFN `RunEC2` state submits a single job; miniwdl executes every WDL
+    # task locally on that one host), so the box only has to fit the PEAK phase, not the sum. After
+    # PR-1 (seqtoid-workflows #16) profiled the phases -- download ~8 vCPU/IO-bound, compress
+    # ~48 vCPU/384 GB, index moderate -- the peak is the compress phase (~384 GB), well under 768 GB.
+    #
+    # Replacing the single hardcoded type with a curated set of x86 families lets Batch bin-pack the
+    # job onto the smallest instance that satisfies its cpu/memory request (see RunEC2Memory below)
+    # instead of always burning the 768 GB giant:
+    #   r6i - memory-optimized, covers the compress peak (r6i.12xlarge 48/384, r6i.16xlarge 64/512)
+    #   m6i - general-purpose, covers the moderate index phase
+    #   c6i - compute/IO, covers the small download phase
+    # Batch (BEST_FIT_PROGRESSIVE) picks the smallest family/size that fits the request. Staying x86
+    # keeps output parity trivial to confirm through the benchmark gate; Graviton is Lever 2 (later).
+    #
+    # NOTE: this is still one box per run. True per-phase fan-out onto separate right-sized boxes
+    # (the plan's "fan the chunked index build out to small spot workers") requires switching the
+    # runner to the miniwdl-aws Batch backend so each WDL task becomes its own Batch job -- a later
+    # change. This CE list is already forward-compatible with that (the small c6i/m6i sizes are here).
+    #
+    # BANDWIDTH NOTE: r5n was the network-optimized ("n") choice for the download/upload phases. r6i
+    # tops out lower (~18.75-25 Gbps) than r5n (~100 Gbps); acceptable because download is I/O- not
+    # network-bound at this scale. If a profiling run shows the download/upload phase is
+    # network-starved, add the network-optimized "r6in" family here.
+    instance_type = var.DEPLOYMENT_ENVIRONMENT == "test" ? ["optimal"] : ["r6i", "m6i", "c6i"]
 
     tags = {
       Name = "${local.service_name}-batch"
@@ -141,15 +171,22 @@ resource "aws_batch_compute_environment" "index_generation_compute_environment" 
     image_id = data.aws_ssm_parameter.idseq_batch_ami.value
     #TODO: Is this needed?
     # ec2_key_pair       = "idseq-${var.DEPLOYMENT_ENVIRONMENT}"
-    min_vcpus          = 0
-    desired_vcpus      = 0
-    max_vcpus          = 96 // 1 r5n.24xlarge
+    min_vcpus     = 0
+    desired_vcpus = 0
+    # Caps total concurrent vCPUs. 96 comfortably hosts the single monolithic runner box
+    # (compress peak ~48-64 vCPU on r6i.12xlarge/r6i.16xlarge) with headroom. Raise this when the
+    # miniwdl-aws per-task fan-out lands and multiple right-sized boxes run in parallel.
+    max_vcpus          = 96
     security_group_ids = [aws_security_group.index_generation.id]
 
     subnets = length(data.aws_subnets.webservice_subnets) > 0 ? data.aws_subnets.webservice_subnets[0].ids : [for subnet in aws_subnet.idseq : subnet.id]
 
-    type                = "EC2"
-    allocation_strategy = "BEST_FIT"
+    type = "EC2"
+    # BEST_FIT_PROGRESSIVE (was BEST_FIT): with a single fixed instance type BEST_FIT was fine, but
+    # now that instance_type spans several x86 families Batch must bin-pack each job onto the
+    # smallest family/size that fits and progress to the next best type when capacity is short.
+    # Valid for EC2 compute environments. (SPOT would use SPOT_CAPACITY_OPTIMIZED.)
+    allocation_strategy = "BEST_FIT_PROGRESSIVE"
     bid_percentage      = 100
     spot_iam_fleet_role = aws_iam_role.idseq_batch_spot_fleet_service_role.arn
 
@@ -276,10 +313,25 @@ resource "aws_lambda_function" "start_index_generation" {
       INDEX_GENERATION_SFN_ARN          = module.swipe.sfn_arns["index-generation"]
       INDEX_GENERATION_WORKFLOW_VERSION = "v2.4.4" # Why is this hardcoded, and the most recent seems to be v2.4.8
       AWS_ACCOUNT_ID                    = var.AWS_ACCOUNT_ID
-      MEMORY                            = "480000"
-      VCPU                              = "60"
-      BUCKET                            = data.aws_s3_bucket.public-references.bucket
-      S3_WORKFLOWS_BUCKET               = aws_s3_bucket.workflows.bucket
+      # RunEC2Memory / RunEC2Vcpu for the single monolithic index-generation Batch job. MEMORY is
+      # the container memory reservation the SFN passes as ContainerOverrides.Memory (RunEC2Memory)
+      # -- it is what makes Batch choose (and reserve) the instance, so it co-determines the box
+      # together with the CE instance_type list above.
+      #
+      # Lever 1 (platform-overhaul 548): reduced 480000 -> 393216 MB to match PR-1's profiled
+      # compress peak (~384 GB) plus a little host headroom, so Batch bin-packs onto an r6i.12xlarge
+      # (48/384) / r6i.16xlarge (64/512) instead of a 768 GB box. 393216 MB = 384 GiB.
+      #
+      # GATING: the exact right-size is only confirmable by a profiling run. If the compress phase
+      # OOMs or Batch cannot place a 393216 MB job on r6i.12xlarge (ECS host reservation eats a few
+      # GB), Batch already steps up to the next-larger r6i (r6i.16xlarge, 512 GB) automatically --
+      # still far below the old 768 GB box. Re-tune from the profiling run before enabling the
+      # scheduled trigger. RunEC2Vcpu is currently advisory: the SFN template overrides only Memory,
+      # so vCPU comes from the SWIPE-generated job definition, not this value.
+      MEMORY              = "393216"
+      VCPU                = "48"
+      BUCKET              = data.aws_s3_bucket.public-references.bucket
+      S3_WORKFLOWS_BUCKET = aws_s3_bucket.workflows.bucket
     }
   }
 }
