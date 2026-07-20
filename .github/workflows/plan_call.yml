@@ -7,6 +7,14 @@ on:
         description: Both Github Environment and AWS Environment
         type: string
         required: true
+      targets:
+        description: >-
+          Optional space-separated terraform resource addresses. When set, the plan is limited to
+          these (-target) instead of the whole configuration. Use to review a narrow change against
+          a state that carries unrelated pending drift; leave empty for the full plan.
+        type: string
+        required: false
+        default: ''
     outputs:
       plan-artifact-id:
         description: The Artifact ID of the generated Terraform Plan
@@ -46,7 +54,17 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v6.1.0
         if: ${{ !env.ACT }}
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-executor
+          # The read-only plan role, NOT the legacy `-gh-actions-executor`. The executor was
+          # retained only until workflows cut over to the split plan/apply roles; the apply paths
+          # here (deploy.yml, publish-workflows.yml) were cut over and this one was missed, so it
+          # still assumed a role that has no policy attachments at all. The first thing that failed
+          # was the account-alias guard in `environment`: PowerUserAccess/executor cannot call
+          # iam:ListAccountAliases, the guard read an empty alias, refused to continue, and unset
+          # TF_DATA_DIR -- surfacing as `mkdir: cannot create directory ''`, which names neither the
+          # role nor the denial. The plan role carries ReadOnlyAccess (which does allow
+          # ListAccountAliases) plus scoped tfstate read, and its subject_ref_pattern is `*`, so the
+          # `environment:<env>` OIDC subject this job presents is accepted.
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-plan
           output-env-credentials: true
           #role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
@@ -80,6 +98,23 @@ jobs:
           mkdir -p "$TF_DATA_DIR"
           jq -n ".region=\"us-west-2\" | .bucket=env.TF_S3_BUCKET | .key=env.APP_NAME+env.DEPLOYMENT_ENVIRONMENT | .encrypt=true" > "$TF_DATA_DIR/aws_config.json"
           jq . "$TF_DATA_DIR/aws_config.json"
+
+          # Hand the sourced environment to the LATER steps. Every `run:` block is its own shell,
+          # so nothing `environment.<env>` exports survives past this step -- which made this step a
+          # no-op for everything downstream and meant this workflow could never have completed a
+          # plan. `make` tripped its own DEPLOYMENT_ENVIRONMENT guard first ("Please run source
+          # environment..."), and had it not, `terraform init` would have failed next with no
+          # TF_CLI_ARGS_init to point it at the S3 backend.
+          #
+          # Only the variables `environment` derives are forwarded. AWS credentials are NOT included:
+          # configure-aws-credentials already publishes those, and $GITHUB_ENV is plain text in the
+          # runner log.
+          for v in APP_HOME APP_NAME DEPLOYMENT_ENVIRONMENT TF_DATA_DIR TFSTATE_FILE \
+                   TF_CLI_ARGS_init TF_CLI_ARGS_output AWS_SDK_LOAD_CONFIG AWS_DEFAULT_REGION \
+                   AWS_ACCOUNT_ID AWS_ACCOUNT_ALIAS TF_S3_BUCKET DOCKER_REGISTRY \
+                   OWNER TF_VAR_owner TF_VAR_environment; do
+            printf '%s=%s\n' "$v" "${!v}" >> "$GITHUB_ENV"
+          done
       - name: Package Lambdas and create Templates
         run: |
           make package-lambdas templates
@@ -91,7 +126,35 @@ jobs:
           terraform init -input=false
           echo "Plan will be created in: ${{ github.workspace }}/tf.plan"
           set +e
-          terraform plan -input=false -detailed-exitcode -refresh=false -out="${{ github.workspace }}/tf.plan"
+          # -lock=false: this backend uses S3-native lockfile locking (use_lockfile = true), so
+          # acquiring a lock means PutObject on <bucket>/idseqdev.tflock. The plan role is
+          # read-only by design and cannot write it:
+          #
+          #   Error acquiring the state lock ... czid-dev-gh-actions-plan is not authorized to
+          #   perform: s3:PutObject on "tfstate-491013321714-test/idseqdev.tflock"
+          #
+          # A plan writes no state, so it needs no lock. The apply path keeps locking -- it runs as
+          # the apply role, which holds tfstate read/write.
+          #
+          # Refresh is deliberately ON. With -refresh=false terraform compares config against the
+          # STATE FILE rather than against AWS, so the diff omits anything that drifted out of band
+          # and a clean plan proves nothing about the real account. The apply this plan gates
+          # (`make deploy` -> `terraform apply`) DOES refresh, so a -refresh=false plan can and does
+          # understate what the apply will do -- the plan stops being a review of the apply.
+          # Refreshing only reads AWS (covered by the plan role's ReadOnlyAccess) and is held in
+          # memory; `terraform plan` never persists refreshed state, which is also why dropping the
+          # lock above stays safe.
+          # Optional -target scoping. Empty (the default) plans the whole configuration.
+          targets=()
+          for t in ${{ inputs.targets }}; do
+            targets+=("-target=$t")
+          done
+          if [[ ${#targets[@]} -gt 0 ]]; then
+            echo "NOTE: plan is scoped to ${#targets[@]} target(s); it does NOT show the full diff."
+            printf '  %s\n' "${targets[@]}"
+          fi
+
+          terraform plan -input=false -detailed-exitcode -lock=false "${targets[@]}" -out="${{ github.workspace }}/tf.plan"
           exitcode=$?
           echo "Terraform exited with exit-code $exitcode"
           if [[ $exitcode -eq 1 ]]; then

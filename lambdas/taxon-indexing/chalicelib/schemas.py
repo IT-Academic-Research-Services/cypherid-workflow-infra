@@ -32,5 +32,16 @@ INPUT = {
             "type": "string",
             "title": "The index to use for pipeline runs",
         },
+        "es_host": {
+            "$id": "#/properties/es_host",
+            "type": "string",
+            "title": "Override OpenSearch host to index into",
+            "description": (
+                "Target OpenSearch endpoint for this invocation. When set (e.g. a preview "
+                "sandbox passing its own HEATMAP_ES_ADDRESS = the sandbox domain), the Lambda "
+                "writes into that domain instead of its own DEPLOYMENT_ENVIRONMENT-configured "
+                "host. Omitted for dev/staging/prod, which fall back to the configured host."
+            ),
+        },
     },
 }

@@ -19,6 +19,9 @@ module "sfn-io-helper" {
 module "taxon-indexing" {
   source                 = "./modules/taxon-indexing"
   deployment_environment = var.DEPLOYMENT_ENVIRONMENT
+  # CZID-63: bound log retention + encrypt the worker lambda log group with the workflows CMK.
+  log_retention_in_days = var.lambda_log_retention_in_days
+  log_kms_key_arn       = aws_kms_key.workflows.arn
 }
 
 module "taxon-indexing-concurrency-manager" {
@@ -32,5 +35,9 @@ module "taxon-indexing-concurrency-manager" {
 }
 
 module "taxon-indexing-eviction" {
-  source = "./modules/taxon-indexing-eviction"
+  source                 = "./modules/taxon-indexing-eviction"
+  deployment_environment = var.DEPLOYMENT_ENVIRONMENT
+  # CZID-63: bound log retention + encrypt the eviction lambda log group with the workflows CMK.
+  log_retention_in_days = var.lambda_log_retention_in_days
+  log_kms_key_arn       = aws_kms_key.workflows.arn
 }

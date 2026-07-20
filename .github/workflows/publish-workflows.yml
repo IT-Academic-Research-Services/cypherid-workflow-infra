@@ -30,13 +30,21 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Gate by the GitHub Environment so vars.AWS_ACCOUNT_ID resolves to the target env
+    # account and prod publishes require the Environment's reviewer approval. CZID-81.
+    environment: ${{ inputs.environment }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6.1.0
         with:
-          role-to-assume: arn:aws:iam::941377154785:role/gha-seqtoid
+          # Per-env apply role in the TARGET account -- its czid_ci_cd policy grants the ECR
+          # push + workflows-bucket S3 writes this publish needs. Replaces the shared
+          # idseq-support gha-seqtoid role. Dispatch from main (the apply role is trusted only
+          # from refs/heads/main); the release tag is the workflow_tag input, not the run ref.
+          # CZID-81.
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-apply
           role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
       - name: Resolve account id

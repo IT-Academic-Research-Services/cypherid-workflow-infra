@@ -57,10 +57,13 @@ resource "aws_iam_role_policy" "taxon_indexing_concurrency_manager_role" {
   })
 }
 
-# CloudWatch log group for the concurrency-manager lambda (CZID-63). Declared explicitly
-# for bounded retention + encryption-at-rest instead of the implicit, never-expiring group
-# Lambda auto-creates. Created before the function (depends_on) so it writes into this group.
-# In an env where the implicit group already exists, import it once before the first apply.
+# CloudWatch log group for the concurrency-manager lambda (CZID-63): bounded retention + CMK
+# encryption instead of the implicit never-expiring, unencrypted group Lambda auto-creates.
+# In dev the implicit group already exists, so it is adopted via `terraform import`
+# (make import-log-groups) before the first managing apply -- a plain apply would hit
+# ResourceAlreadyExistsException, and an `import` block does not help here (this repo deploys
+# with `-target`, which skips import blocks). depends_on orders it before the function so a fresh
+# env never lets Lambda auto-create the implicit group first.
 resource "aws_cloudwatch_log_group" "taxon_indexing_concurrency_manager" {
   #checkov:skip=CKV_AWS_338:90-day retention (var.log_retention_in_days) is the deliberate cost/policy choice for this lambda log group; CKV_AWS_338 wants >=1 year. Logs are KMS-encrypted via the workflows CMK (var.log_kms_key_arn).
   name              = "/aws/lambda/taxon-indexing-concurrency-manager-${var.deployment_environment}"
@@ -70,7 +73,7 @@ resource "aws_cloudwatch_log_group" "taxon_indexing_concurrency_manager" {
 
 resource "aws_lambda_function" "taxon_indexing_concurrency_manager" {
   function_name    = "taxon-indexing-concurrency-manager-${var.deployment_environment}"
-  runtime          = "nodejs16.x"
+  runtime          = "nodejs20.x"
   handler          = "app.handler"
   memory_size      = 512
   timeout          = 900

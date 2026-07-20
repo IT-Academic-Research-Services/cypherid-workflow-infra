@@ -2,7 +2,7 @@ name: Plan only
 run-name: Plan only in env ${{ inputs.environment || github.base_ref || github.ref_name }} branch ${{ github.base_ref || github.ref_name }} by ${{ github.actor }}
 
 on:
-  # Planning assumes an AWS OIDC role (czid-<env>-gh-actions-executor) and reads
+  # Planning assumes an AWS OIDC role (czid-<env>-gh-actions-plan) and reads
   # the real S3 backend, so it can't run until GitHub Environments + OIDC roles
   # exist (CZID-81 / CZID-26). Until then it is manual-only; the no-AWS
   # validate.yml is the automatic push/PR gate.
@@ -13,6 +13,13 @@ on:
         required: true
         type: environment
         default: dev
+      targets:
+        description: >-
+          Optional space-separated terraform addresses to limit the plan to (-target). Leave empty
+          for the full plan.
+        required: false
+        type: string
+        default: ''
 
 env:
   branch_name: ${{ github.base_ref || github.ref_name }}
@@ -67,6 +74,7 @@ jobs:
     uses: ./.github/workflows/plan_call.yml
     with:
       environment: ${{ needs.should-plan.outputs.environment }}
+      targets: ${{ inputs.targets }}
     secrets: inherit
 
   plan-summary:

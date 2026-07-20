@@ -9,16 +9,22 @@ on:
         required: true
         type: string
         default: 'dev'
+      targets:
+        description: >-
+          Optional space-separated terraform resource addresses. When set, the apply is limited to
+          these (-target) instead of the whole configuration. This apply is --auto-approve with no
+          plan-linkage, so it applies whatever the config wants at run time; scoping it is how a
+          narrow change gets applied without dragging along unrelated pending drift. Plan the same
+          targets with the "Plan only" workflow first and confirm the diff. Leave empty for a full
+          apply.
+        required: false
+        type: string
+        default: ''
 
 env:
   AWS_REGION : us-west-2
   GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
   DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment }}
-  # CZID-40 (CICD-6): drive the CI identity from repo/org Actions variables so it is rotatable and
-  # not tied to a hardcoded account. Falls back to the current values if the vars are unset, so this
-  # is safe to merge before the Actions variables are configured.
-  CI_ACCOUNT_ID: ${{ vars.CI_ACCOUNT_ID || '941377154785' }}
-  GHA_ROLE: ${{ vars.GHA_ROLE || 'gha-seqtoid' }}
 
 permissions:
   id-token: write
@@ -38,9 +44,26 @@ jobs:
       - name: configure aws credentials
         uses: aws-actions/configure-aws-credentials@v6.1.0
         with:
-          role-to-assume: arn:aws:iam::${{ env.CI_ACCOUNT_ID }}:role/${{ env.GHA_ROLE }}
+          # Per-env least-privilege apply role in the TARGET account -- the same identity our
+          # terraform plan/apply and web-infra deploys use, whose czid_ci_cd policy authorizes
+          # batch/states/lambda/ecr/s3. Replaces the shared idseq-support gha-seqtoid role. The
+          # apply role is trusted only from refs/heads/main, which is the workflow_dispatch
+          # default ref. CZID-40 (CICD-6) / CZID-81.
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-apply
           role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
+          # aws-profile is load-bearing, not tidiness. `environment` derives the region with
+          #   AWS_DEFAULT_REGION=$(aws configure get region)
+          # which reads the profile CONFIG FILE, not the aws-region input above and not the
+          # AWS_DEFAULT_REGION that init_ci_runner.sh already exported. Without a profile written to
+          # disk that command returns empty and the assignment silently overwrites a correct region
+          # with nothing:
+          #   +++++ aws configure get region
+          #   ++++ AWS_DEFAULT_REGION=
+          # Every later AWS call then runs with no region. plan_call.yml sets aws-profile, which is
+          # why the plan path works and this one did not.
+          aws-profile: idseq-${{ inputs.environment }}
+          output-env-credentials: true
       - name: Sts GetCallerIdentity
         run: |
           aws sts get-caller-identity
@@ -57,4 +80,17 @@ jobs:
           #trap 'scripts/report_deployment_status.sh failure' ERR
           #scripts/report_deployment_status.sh in_progress "Starting deployment"
           source scripts/init_ci_runner.sh
+
+          # Optional -target scoping. init_ci_runner.sh sets TF_CLI_ARGS_apply=--auto-approve, so
+          # append rather than assign, and do it after sourcing or it gets overwritten.
+          if [[ -n "${{ inputs.targets }}" ]]; then
+            for t in ${{ inputs.targets }}; do
+              TF_CLI_ARGS_apply="$TF_CLI_ARGS_apply -target=$t"
+            done
+            export TF_CLI_ARGS_apply
+            echo "SCOPED APPLY -- terraform will touch only the targets below, not the full config:"
+            printf '  %s\n' ${{ inputs.targets }}
+          fi
+          echo "TF_CLI_ARGS_apply=$TF_CLI_ARGS_apply"
+
           make deploy

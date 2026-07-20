@@ -47,7 +47,16 @@ def index_taxons(event, context):
     )
     pipeline_runs_index_name = event.get("pipeline_runs_index_name", "pipeline_runs")
 
-    create_pipeline_run(pipeline_run_id, background_id, pipeline_runs_index_name)
+    # Per-invocation OpenSearch target. Preview sandboxes pass their own HEATMAP_ES_ADDRESS
+    # (= the isolated sandbox domain) as es_host so a sandbox pipeline run's taxon indexing lands
+    # in the sandbox domain, never dev's. dev/staging/prod omit es_host and use the module-level
+    # `es` client built from the DEPLOYMENT_ENVIRONMENT-configured host (unchanged behavior).
+    es_host = event.get("es_host")
+    es_client = OpenSearch(es_host, timeout=120) if es_host else es
+
+    create_pipeline_run(
+        pipeline_run_id, background_id, pipeline_runs_index_name, es_client
+    )
     if "LOCAL_MODE" in os.environ:
         # in local mode, passing a password parameter (even None)
         # will cause the connection to fail
@@ -88,18 +97,20 @@ def index_taxons(event, context):
             scored_taxon_counts_index_name,
             batchsize=es_batchsize,
         ):
-            bulk_index_taxon_metrics(batch)
+            bulk_index_taxon_metrics(batch, es_client)
 
     # refresh the index so that all written records are available to search before returning
     try:
-        response = es.indices.refresh(index=scored_taxon_counts_index_name)
+        response = es_client.indices.refresh(index=scored_taxon_counts_index_name)
     except Exception as exc:
         # The heatmap ES timeout used to die silently in CloudWatch; make it
         # visible in Sentry, then re-raise so the Lambda still fails.
         capture_exception(exc)
         raise
     logger.info(response)
-    complete_pipeline_run(pipeline_run_id, background_id, pipeline_runs_index_name)
+    complete_pipeline_run(
+        pipeline_run_id, background_id, pipeline_runs_index_name, es_client
+    )
 
     conn.close()
 
@@ -217,12 +228,13 @@ def index_taxon_metrics(taxon_metrics, index_name):
     logger.info(response)
 
 
-def bulk_index_taxon_metrics(batch):
+def bulk_index_taxon_metrics(batch, es_client=None):
     """
     Write a batch of taxons to ES
     """
+    es_client = es_client or es
     if batch:
-        response = es.bulk(batch)
+        response = es_client.bulk(batch)
         if response["errors"]:
             errors = [
                 item["index"]["error"]
@@ -243,13 +255,14 @@ def bulk_index_taxon_metrics(batch):
         logger.info(response)
 
 
-def create_pipeline_run(pipeline_run_id, background_id, index_name):
+def create_pipeline_run(pipeline_run_id, background_id, index_name, es_client=None):
     """
     Create/overwrite the pipeline_runs index record
     for the given pipeline so that we can track the
     completeness of the scored_taxon_counts writes
     """
-    response = es.index(
+    es_client = es_client or es
+    response = es_client.index(
         index=index_name,
         body={
             "pipeline_run_id": pipeline_run_id,
@@ -263,13 +276,14 @@ def create_pipeline_run(pipeline_run_id, background_id, index_name):
     logger.info(response)
 
 
-def complete_pipeline_run(pipeline_run_id, background_id, index_name):
+def complete_pipeline_run(pipeline_run_id, background_id, index_name, es_client=None):
     """
     Update the pipeline_run index record to indicate
     that all scored_taxon_count records were
     successfully written
     """
-    response = es.update(
+    es_client = es_client or es
+    response = es_client.update(
         index=index_name,
         body={"doc": {"is_complete": True}},
         id=f"{pipeline_run_id}_{background_id}",
