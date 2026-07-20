@@ -18,13 +18,27 @@ logger.setLevel(logging.INFO)
 
 DEFAULT_ES_BATCHSIZE = 1000
 
+
+def build_os_client(host):
+    """
+    Build an OpenSearch client that survives node rotation. czid-*-heatmap-es is a
+    small zone-aware domain whose nodes are periodically replaced; when a node's ENI
+    IP changes, a warm Lambda container reusing a pooled connection dials the dead IP
+    and the connect times out. opensearch-py does NOT retry timeouts by default
+    (retry_on_timeout defaults to False), so that single dead-IP dial fails the whole
+    invocation. retry_on_timeout=True marks the dead connection and retries, which
+    re-resolves DNS onto a live node. See platform-overhaul #723.
+    """
+    return OpenSearch(host, timeout=120, max_retries=3, retry_on_timeout=True)
+
+
 if "AWS_CHALICE_CLI_MODE" not in os.environ:
     # Wire Sentry so unhandled Lambda errors (e.g. the heatmap ES timeout) reach
     # the same Sentry project as the Rails backend instead of dying silently in
     # CloudWatch.
     init_sentry()
     params = config.get_parameters()
-    es = OpenSearch(params["es_host"], timeout=120)
+    es = build_os_client(params["es_host"])
 
 
 def handler(event, context):
@@ -52,7 +66,7 @@ def index_taxons(event, context):
     # in the sandbox domain, never dev's. dev/staging/prod omit es_host and use the module-level
     # `es` client built from the DEPLOYMENT_ENVIRONMENT-configured host (unchanged behavior).
     es_host = event.get("es_host")
-    es_client = OpenSearch(es_host, timeout=120) if es_host else es
+    es_client = build_os_client(es_host) if es_host else es
 
     create_pipeline_run(
         pipeline_run_id, background_id, pipeline_runs_index_name, es_client
