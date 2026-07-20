@@ -15,7 +15,7 @@ locals {
   # fan-out design / PR-1 per-task numbers; confirm against one profiling run before prod.
   #
   #   download        IO-bound download; small on-demand box, small scratch.
-  #   compress        long single ncbi-compress task; r6i on-demand, ~4 TB scratch.
+  #   compress        long single ncbi-compress task; on-demand, ~4 TB scratch.
   #                   ON-DEMAND on purpose: a spot reclaim on this multi-hour un-checkpointed
   #                   task restarts the whole rebuild (the reason the on-demand CE fix landed).
   #   index_spot      minimap2/diamond index build on SPOT -- interruption-tolerant, cheap.
@@ -23,30 +23,59 @@ locals {
   #
   # In the moto test env everything collapses to on-demand "optimal" (spot fleet + specific
   # families are not modelled by moto), matching how the old single CE behaved under test.
-  index_generation_stages = {
+  #
+  # ARCHITECTURE TOGGLE (Lever 2, platform-overhaul 548). Each stage carries BOTH its x86
+  # (Track A default / fallback) and its 1:1 Graviton3 (arm64) analogue; var.use_graviton
+  # picks which set the compute environments use. The vCPU/memory/scratch/provisioning
+  # targets are architecture-independent and identical across the two families, so only the
+  # CPU architecture changes -- reverting to x86 is a one-line flip of var.use_graviton back
+  # to false. Graviton is HELD/GATED (see var.use_graviton and the AMI note below): default
+  # stays x86 until the arm64 image publish + arm64 AUPR >= 0.98 gates pass.
+  #
+  # x86 -> Graviton3 analogues (same vCPU/GiB point):
+  #   download   c6i.2xlarge (8/16)             -> m7g.2xlarge  (8/32)
+  #   compress   r6i.12xlarge (48/384)          -> r7g.12xlarge (48/384)
+  #   index      r6i.{4,8,12}xlarge (16..48 / 128..384) -> r7g.{4,8,12}xlarge (same)
+  index_generation_stages_base = {
     download = {
-      instance_types = ["c6i.2xlarge"] # 8 vCPU / 16 GB
-      max_vcpus      = 8
-      scratch_gb     = 500
-      provisioning   = "EC2"
+      instance_types_x86      = ["c6i.2xlarge"] # 8 vCPU / 16 GB
+      instance_types_graviton = ["m7g.2xlarge"] # 8 vCPU / 32 GB (Graviton3)
+      max_vcpus               = 8
+      scratch_gb              = 500
+      provisioning            = "EC2"
     }
     compress = {
-      instance_types = ["r6i.12xlarge"] # 48 vCPU / 384 GB
-      max_vcpus      = 48
-      scratch_gb     = 4096
-      provisioning   = "EC2"
+      instance_types_x86      = ["r6i.12xlarge"] # 48 vCPU / 384 GB
+      instance_types_graviton = ["r7g.12xlarge"] # 48 vCPU / 384 GB (Graviton3)
+      max_vcpus               = 48
+      scratch_gb              = 4096
+      provisioning            = "EC2"
     }
     index_spot = {
-      instance_types = ["r6i.4xlarge", "r6i.8xlarge", "r6i.12xlarge"]
-      max_vcpus      = 192
-      scratch_gb     = 2048
-      provisioning   = "SPOT"
+      instance_types_x86      = ["r6i.4xlarge", "r6i.8xlarge", "r6i.12xlarge"]
+      instance_types_graviton = ["r7g.4xlarge", "r7g.8xlarge", "r7g.12xlarge"]
+      max_vcpus               = 192
+      scratch_gb              = 2048
+      provisioning            = "SPOT"
     }
     index_ondemand = {
-      instance_types = ["r6i.4xlarge", "r6i.8xlarge", "r6i.12xlarge"]
-      max_vcpus      = 192
-      scratch_gb     = 2048
-      provisioning   = "EC2"
+      instance_types_x86      = ["r6i.4xlarge", "r6i.8xlarge", "r6i.12xlarge"]
+      instance_types_graviton = ["r7g.4xlarge", "r7g.8xlarge", "r7g.12xlarge"]
+      max_vcpus               = 192
+      scratch_gb              = 2048
+      provisioning            = "EC2"
+    }
+  }
+
+  # Effective per-stage map consumed by the launch templates, compute environments, and
+  # queues below. Selects the x86 or Graviton family per stage from var.use_graviton; every
+  # other field is copied through unchanged. This is the single place the arch switch happens.
+  index_generation_stages = {
+    for name, cfg in local.index_generation_stages_base : name => {
+      instance_types = var.use_graviton ? cfg.instance_types_graviton : cfg.instance_types_x86
+      max_vcpus      = cfg.max_vcpus
+      scratch_gb     = cfg.scratch_gb
+      provisioning   = cfg.provisioning
     }
   }
 }
@@ -60,9 +89,38 @@ variable "lambda_log_retention_in_days" {
   description = "CloudWatch Logs retention in days for lambda log groups managed by this repo."
 }
 
+# Lever 2 (platform-overhaul 548): run the index-generation per-stage Batch compute
+# environments on Graviton3 (arm64) instead of Track A's x86 families. Declared here rather
+# than in the env-generated variables.tf (which only carries deployment-derived values)
+# because it is a static architecture toggle, co-located with its only consumer -- the same
+# pattern as lambda_log_retention_in_days above.
+#
+# Default false so x86 stays the applied state: this is the fallback. HELD/GATED -- flip to
+# true (a one-line change, the whole point of the toggle) ONLY after BOTH gates pass:
+#   1. the multi-arch/arm64 index-generation image is published to ECR (an arm64 host cannot
+#      pull an x86-only image), and
+#   2. an arm64 IDSEQ_BENCH rebuild holds AUPR >= 0.98 (arch changes are adopted only after
+#      the AUPR gate, per NTNR-OPTIMIZATION-PLAN-2026-07-20.md Lever 2).
+# If arm64 AUPR regresses, flip back to false to revert to Track A's x86 per-stage families.
+# When true, index-generation.tf's ECS-optimized AMI lookup also switches to the arm64 image
+# so the AMI arch matches the instance arch.
+variable "use_graviton" {
+  type        = bool
+  default     = false
+  description = "Run index-generation Batch stages on Graviton3 (arm64). Default false (x86 fallback); enable only after the arm64 image publish + arm64 AUPR>=0.98 gates pass."
+}
+
 data "aws_ssm_parameter" "idseq_batch_ami" {
-  # NOTE: this conditional is because moto errors on creating ssm parameters that begin with aws or ssm
-  name = "/${var.DEPLOYMENT_ENVIRONMENT == "test" ? "mock-aws" : "aws"}/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id"
+  # NOTE: the mock-aws/aws conditional is because moto errors on creating ssm parameters that begin with aws or ssm.
+  #
+  # Graviton (Lever 2): arm64 Batch hosts must boot an arm64 ECS-optimized AMI, so when
+  # var.use_graviton is set the SSM lookup switches to the AWS-published arm64 image_id
+  # parameter (.../amazon-linux-2/arm64/recommended/image_id) instead of the x86_64 one
+  # (.../amazon-linux-2/recommended/image_id). Both the launch templates and the compute
+  # environments below read this one data source, so the AMI arch tracks the instance arch.
+  # Test stays on the x86 mock param: moto only seeds that path (Makefile) and the test env
+  # collapses every stage to on-demand "optimal", so an arm64 AMI is neither seeded nor needed.
+  name = "/${var.DEPLOYMENT_ENVIRONMENT == "test" ? "mock-aws" : "aws"}/service/ecs/optimized-ami/amazon-linux-2/${var.use_graviton && var.DEPLOYMENT_ENVIRONMENT != "test" ? "arm64/" : ""}recommended/image_id"
 }
 
 data "aws_vpc" "webservice_vpc" {
