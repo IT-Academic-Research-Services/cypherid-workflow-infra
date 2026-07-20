@@ -89,3 +89,17 @@ resource "aws_security_group" "taxon_indexing_eviction" {
     cidr_blocks = [data.aws_vpc.webservice_vpc[0].cidr_block]
   }
 }
+
+# CloudWatch log group for the taxon-indexing eviction lambda (CZID-63): bounded retention + CMK
+# encryption. Name matches the chalice-generated `evict` function
+# (/aws/lambda/taxon-indexing-eviction-lambda-<env>-evict). No depends_on (chalice-generated
+# lambda, not editable here); not needed -- see the equivalent note in modules/taxon-indexing.
+# Adopted in dev via `terraform import` (make import-log-groups) before the first managing apply.
+resource "aws_cloudwatch_log_group" "taxon_indexing_eviction" {
+  #checkov:skip=CKV_AWS_338:90-day retention (var.log_retention_in_days) is the deliberate cost/policy choice for this lambda log group; CKV_AWS_338 wants >=1 year. Logs are KMS-encrypted via the workflows CMK (var.log_kms_key_arn).
+  count = var.deployment_environment == "test" ? 0 : 1
+
+  name              = "/aws/lambda/taxon-indexing-eviction-lambda-${var.deployment_environment}-evict"
+  retention_in_days = var.log_retention_in_days
+  kms_key_id        = var.log_kms_key_arn
+}

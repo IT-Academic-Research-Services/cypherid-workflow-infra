@@ -17,6 +17,20 @@ deploy: package-lambdas templates init-tf
 	@if [[ $(DEPLOYMENT_ENVIRONMENT) == prod && $$(git symbolic-ref --short HEAD) != prod ]]; then echo Please deploy prod from the prod branch; exit 1; fi
 	terraform apply
 
+# CZID-63: one-time adoption of the taxon-indexing lambda log groups that Lambda auto-created before
+# they were declared as terraform resources. `terraform import` is required (a plain apply hits
+# ResourceAlreadyExistsException; an `import` block is skipped under -target). Idempotent -- skips any
+# group already in state. Run via the "Import Log Groups" GitHub workflow (Linux CI; local terraform
+# is blocked by the archived template provider on arm64). After importing, deploy the three modules
+# (targeted) to reconcile retention + KMS onto the imported groups.
+import-log-groups: package-lambdas templates init-tf
+	terraform state list | grep -qx 'module.idseq.module.taxon-indexing.aws_cloudwatch_log_group.taxon_indexing[0]' || \
+		terraform import 'module.idseq.module.taxon-indexing.aws_cloudwatch_log_group.taxon_indexing[0]' '/aws/lambda/taxon-indexing-lambda-$(DEPLOYMENT_ENVIRONMENT)-index_taxons'
+	terraform state list | grep -qx 'module.idseq.module.taxon-indexing-eviction.aws_cloudwatch_log_group.taxon_indexing_eviction[0]' || \
+		terraform import 'module.idseq.module.taxon-indexing-eviction.aws_cloudwatch_log_group.taxon_indexing_eviction[0]' '/aws/lambda/taxon-indexing-eviction-lambda-$(DEPLOYMENT_ENVIRONMENT)-evict'
+	terraform state list | grep -qx 'module.idseq.module.taxon-indexing-concurrency-manager.aws_cloudwatch_log_group.taxon_indexing_concurrency_manager' || \
+		terraform import 'module.idseq.module.taxon-indexing-concurrency-manager.aws_cloudwatch_log_group.taxon_indexing_concurrency_manager' '/aws/lambda/taxon-indexing-concurrency-manager-$(DEPLOYMENT_ENVIRONMENT)'
+
 # NOTE: moto errors on creating ssm parameters that begin with aws or ssm
 deploy-mock: templates package-lambdas
 	aws ssm put-parameter --name /mock-aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id --value ami-12345678 --type String --endpoint-url http://localhost:9000
@@ -64,4 +78,4 @@ clean:
 	git clean -fx .terraform.* test/.terraform.* terraform/chalice.tf.json terraform/modules/*/chalice.tf.json terraform/modules/*/*deployment.zip *-lambda/.chalice/deployments
 	rm -rf taxon-indexing-lambda/concurrency-manager/node_modules
 
-.PHONY: deploy deploy-mock plan templates init-tf package-lambdas lint clean
+.PHONY: deploy deploy-mock plan templates init-tf package-lambdas lint clean import-log-groups
