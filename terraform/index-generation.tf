@@ -135,34 +135,38 @@ resource "aws_batch_compute_environment" "index_generation_compute_environment" 
   compute_resources {
     instance_role = aws_iam_instance_profile.idseq_batch_main.arn
 
-    # Lever 1 (platform-overhaul 548): right-size the box index generation lands on.
+    # Lever 2 (platform-overhaul 548): move the right-sized box onto Graviton (arm64).
     #
-    # History: a single fixed r5n.24xlarge (96 vCPU / 768 GB) was used because the run needs a lot
-    # of memory, fast RAID0 scratch, and download/upload bandwidth. But index generation runs as ONE
-    # monolithic Batch job (the SFN `RunEC2` state submits a single job; miniwdl executes every WDL
-    # task locally on that one host), so the box only has to fit the PEAK phase, not the sum. After
-    # PR-1 (seqtoid-workflows #16) profiled the phases -- download ~8 vCPU/IO-bound, compress
-    # ~48 vCPU/384 GB, index moderate -- the peak is the compress phase (~384 GB), well under 768 GB.
+    # This supersedes the x86 family choice from Lever 1 (r6i/m6i/c6i). Same rationale as Lever 1 --
+    # index generation runs as ONE monolithic Batch job (the SFN `RunEC2` state submits a single job;
+    # miniwdl executes every WDL task locally on that one host), so the box only has to fit the PEAK
+    # phase (compress, ~384 GB), and a curated multi-family list lets Batch bin-pack onto the smallest
+    # instance that satisfies the cpu/memory request (see RunEC2Memory below). The only change here is
+    # the CPU architecture: x86 6th-gen -> Graviton3 7th-gen for ~15-40% better price/performance.
+    #   r7g - memory-optimized, covers the compress peak (r7g.12xlarge 48/384, r7g.16xlarge 64/512)
+    #   m7g - general-purpose, covers the moderate index phase
+    #   c7g - compute/IO, covers the small download phase
+    # r7g/m7g/c7g are the 1:1 Graviton3 analogues of the r6i/m6i/c6i sizes and match the same
+    # vCPU/memory points, so the box-selection logic (RunEC2Memory = 393216 MB) is unchanged.
     #
-    # Replacing the single hardcoded type with a curated set of x86 families lets Batch bin-pack the
-    # job onto the smallest instance that satisfies its cpu/memory request (see RunEC2Memory below)
-    # instead of always burning the 768 GB giant:
-    #   r6i - memory-optimized, covers the compress peak (r6i.12xlarge 48/384, r6i.16xlarge 64/512)
-    #   m6i - general-purpose, covers the moderate index phase
-    #   c6i - compute/IO, covers the small download phase
-    # Batch (BEST_FIT_PROGRESSIVE) picks the smallest family/size that fits the request. Staying x86
-    # keeps output parity trivial to confirm through the benchmark gate; Graviton is Lever 2 (later).
+    # GATING (do NOT apply until both hold):
+    #   1. The arm64/multi-arch index-generation image (seqtoid-workflows, index-generation Dockerfile)
+    #      is merged and the multi-arch image is published -- an arm64 host cannot pull an x86-only
+    #      image. All six tools (ncbi-compress, minimap2, diamond, seqkit, marisa-trie, BLAST+) build
+    #      and smoke on linux/arm64; see that PR.
+    #   2. A benchmark-equivalence run (IDSEQ_BENCH AUPR >= 0.98) proves the arm64-built indexes match
+    #      the x86 baseline. Arch changes are only adopted after the AUPR gate, per the plan.
     #
     # NOTE: this is still one box per run. True per-phase fan-out onto separate right-sized boxes
     # (the plan's "fan the chunked index build out to small spot workers") requires switching the
     # runner to the miniwdl-aws Batch backend so each WDL task becomes its own Batch job -- a later
-    # change. This CE list is already forward-compatible with that (the small c6i/m6i sizes are here).
+    # change. This CE list is already forward-compatible with that (the small c7g/m7g sizes are here).
     #
-    # BANDWIDTH NOTE: r5n was the network-optimized ("n") choice for the download/upload phases. r6i
-    # tops out lower (~18.75-25 Gbps) than r5n (~100 Gbps); acceptable because download is I/O- not
+    # BANDWIDTH NOTE: r5n was the network-optimized ("n") choice for the download/upload phases. r7g
+    # tops out lower (~12.5-30 Gbps) than r5n (~100 Gbps); acceptable because download is I/O- not
     # network-bound at this scale. If a profiling run shows the download/upload phase is
-    # network-starved, add the network-optimized "r6in" family here.
-    instance_type = var.DEPLOYMENT_ENVIRONMENT == "test" ? ["optimal"] : ["r6i", "m6i", "c6i"]
+    # network-starved, add the network-optimized "r7gn" family here.
+    instance_type = var.DEPLOYMENT_ENVIRONMENT == "test" ? ["optimal"] : ["r7g", "m7g", "c7g"]
 
     tags = {
       Name = "${local.service_name}-batch"
@@ -174,7 +178,7 @@ resource "aws_batch_compute_environment" "index_generation_compute_environment" 
     min_vcpus     = 0
     desired_vcpus = 0
     # Caps total concurrent vCPUs. 96 comfortably hosts the single monolithic runner box
-    # (compress peak ~48-64 vCPU on r6i.12xlarge/r6i.16xlarge) with headroom. Raise this when the
+    # (compress peak ~48-64 vCPU on r7g.12xlarge/r7g.16xlarge) with headroom. Raise this when the
     # miniwdl-aws per-task fan-out lands and multiple right-sized boxes run in parallel.
     max_vcpus          = 96
     security_group_ids = [aws_security_group.index_generation.id]
@@ -183,9 +187,13 @@ resource "aws_batch_compute_environment" "index_generation_compute_environment" 
 
     type = "EC2"
     # BEST_FIT_PROGRESSIVE (was BEST_FIT): with a single fixed instance type BEST_FIT was fine, but
-    # now that instance_type spans several x86 families Batch must bin-pack each job onto the
-    # smallest family/size that fits and progress to the next best type when capacity is short.
-    # Valid for EC2 compute environments. (SPOT would use SPOT_CAPACITY_OPTIMIZED.)
+    # now that instance_type spans several Graviton families Batch must bin-pack each job onto the
+    # smallest family/size that fits and progress to the next best type when capacity is short. This
+    # remains correct for the r7g/m7g/c7g list. Valid for EC2 compute environments.
+    # FOLLOW-UP: this CE bids spot (bid_percentage = 100 + spot fleet role). If it is switched to a
+    # true SPOT compute environment (type = "SPOT"), change this to SPOT_PRICE_CAPACITY_OPTIMIZED so
+    # Batch draws from the deepest/cheapest Graviton spot pools and minimizes interruptions during the
+    # long compression phase -- a separate change, not made here.
     allocation_strategy = "BEST_FIT_PROGRESSIVE"
     bid_percentage      = 100
     spot_iam_fleet_role = aws_iam_role.idseq_batch_spot_fleet_service_role.arn
