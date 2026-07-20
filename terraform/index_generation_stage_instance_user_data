@@ -1,0 +1,32 @@
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="==MYBOUNDARY=="
+
+--==MYBOUNDARY==
+Content-Type: text/cloud-boothook; charset="us-ascii"
+
+#!/bin/bash -ex
+
+##############################################
+# Mount scratch drive (single per-stage volume)
+##############################################
+# The monolithic index-generation box RAID0'd 4 x 16 TB volumes into 64 TB because one host
+# ran every phase end-to-end. The per-stage boxes each keep only their own working set on a
+# single right-sized gp3 volume (Lever 1), so there is no RAID here -- just format+mount the
+# one attached scratch device. Glob the secondary EBS device so we do not depend on the
+# in-guest device name (NVMe remapping) matching the launch-template block-device name.
+
+yum install -y amazon-ssm-agent
+
+scratch_device=$(ls /dev/sd? 2>/dev/null | head -n1 || true)
+if [ -n "$scratch_device" ] && [ ! -d /mnt/lost+found ]; then
+    mkfs.xfs -f "$scratch_device"
+    mount "$scratch_device" /mnt
+fi
+
+##############################################
+# Configure Docker to use the scratch volume for scratch space
+##############################################
+
+cloud-init-per once docker_options echo '{"data-root": "/mnt/docker"}' >> /etc/docker/daemon.json
+
+--==MYBOUNDARY==--
