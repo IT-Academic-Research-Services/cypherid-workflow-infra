@@ -58,6 +58,7 @@ locals {
 # of ownership as the lineage pointer (TF/seed owns existence, ops owns the live
 # value). tier=Standard, type=String: a short version string, not a secret.
 resource "aws_ssm_parameter" "reference_index_current_version" {
+  #checkov:skip=CKV2_AWS_34:non-secret value (a public dated index-generation version string, e.g. 2024-02-06). A SecureString/KMS param adds cost + forces --with-decryption in the promote/rollback scripts for zero confidentiality benefit; String is deliberate.
   name        = "${local.reference_index_ssm_prefix}/current-version"
   description = "Currently-serving NT/NR index-generation version (dated prefix segment). Flipped by the promote/rollback scripts; blue/green cutover pointer."
   type        = "String"
@@ -80,6 +81,7 @@ resource "aws_ssm_parameter" "reference_index_current_version" {
 # single atomic flip back. Mirrors how lineage cutover prints the previous name
 # for `taxonomy:cutover_rollback`.
 resource "aws_ssm_parameter" "reference_index_previous_version" {
+  #checkov:skip=CKV2_AWS_34:non-secret value (a public dated index-generation version string). String is deliberate; see current-version above.
   name        = "${local.reference_index_ssm_prefix}/previous-version"
   description = "Prior NT/NR index-generation version retained as the fast rollback target. Set by the promote script; consumed by the rollback script."
   type        = "String"
@@ -103,6 +105,7 @@ resource "aws_ssm_parameter" "reference_index_previous_version" {
 # without any path parsing at the consumer. Rarely changes (only on a new
 # index-generation format), so this one is TF-managed end to end (no ignore).
 resource "aws_ssm_parameter" "reference_index_major_version" {
+  #checkov:skip=CKV2_AWS_34:non-secret value (the index-generation major-version segment, e.g. 2). String is deliberate; see current-version above.
   name        = "${local.reference_index_ssm_prefix}/major-version"
   description = "index-generation major-version segment of the serving artifact prefix (index-generation-<major>)."
   type        = "String"
