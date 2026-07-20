@@ -1,0 +1,53 @@
+name: CypherID Workflow Infra Import Log Groups
+run-name: Import taxon-indexing log groups into ${{ inputs.environment }} state
+
+# CZID-63 one-time state adoption. The taxon-indexing worker / eviction / concurrency-manager
+# lambdas' CloudWatch log groups were auto-created by Lambda (no retention, no KMS) before they were
+# declared as terraform resources, so a plain apply hits ResourceAlreadyExistsException. A
+# declarative `import` block does not help because this repo deploys with -target, which skips import
+# blocks; and local `terraform import` is blocked by the archived template provider having no arm64
+# build (Rosetta timeout). This workflow runs `terraform import` on the Linux CI runner (no Rosetta
+# wall) via `make import-log-groups`, which is idempotent (skips any group already in state). After
+# it runs once, deploy the three modules (Deploy workflow, targets set) to reconcile retention + KMS.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'The environment whose state to import the log groups into'
+        required: true
+        type: string
+        default: 'dev'
+
+env:
+  AWS_REGION: us-west-2
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  ImportLogGroups:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Git clone the repository
+        uses: actions/checkout@v6
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          # Same per-env apply role as the Deploy workflow: terraform import writes state (the
+          # backend S3 object) and reads the target log groups, both covered by czid_ci_cd.
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-apply
+          role-session-name: GitHub_to_AWS_via_FederatedOIDC
+          aws-region: ${{ env.AWS_REGION }}
+          aws-profile: idseq-${{ inputs.environment }}
+          output-env-credentials: true
+      - name: Sts GetCallerIdentity
+        run: |
+          aws sts get-caller-identity
+      - name: Import log groups
+        run: |
+          source scripts/init_ci_runner.sh
+          make import-log-groups

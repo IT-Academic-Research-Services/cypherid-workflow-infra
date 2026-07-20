@@ -97,3 +97,21 @@ resource "aws_security_group" "taxon_indexing" {
     cidr_blocks = [data.aws_vpc.webservice_vpc[0].cidr_block]
   }
 }
+
+# CloudWatch log group for the taxon-indexing worker lambda (CZID-63): bounded retention +
+# CMK encryption-at-rest, instead of the implicit never-expiring, unencrypted group Lambda
+# auto-creates. The name matches the chalice-generated function
+# (aws_lambda_function.index_taxons -> /aws/lambda/taxon-indexing-lambda-<env>-index_taxons).
+# No depends_on: the lambda is defined in the generated chalice.tf.json (not editable here). It
+# is not needed -- in a fresh env terraform creates this group before the lambda is ever invoked
+# (Lambda only auto-creates the implicit group on first invocation), so there is no create
+# conflict. In dev the group already exists (the lambda has run), so it is adopted via
+# `terraform import` (make import-log-groups) before the first apply that manages it.
+resource "aws_cloudwatch_log_group" "taxon_indexing" {
+  #checkov:skip=CKV_AWS_338:90-day retention (var.log_retention_in_days) is the deliberate cost/policy choice for this lambda log group; CKV_AWS_338 wants >=1 year. Logs are KMS-encrypted via the workflows CMK (var.log_kms_key_arn).
+  count = var.deployment_environment == "test" ? 0 : 1
+
+  name              = "/aws/lambda/taxon-indexing-lambda-${var.deployment_environment}-index_taxons"
+  retention_in_days = var.log_retention_in_days
+  kms_key_id        = var.log_kms_key_arn
+}

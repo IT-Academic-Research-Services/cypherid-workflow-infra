@@ -57,16 +57,19 @@ resource "aws_iam_role_policy" "taxon_indexing_concurrency_manager_role" {
   })
 }
 
-# NOTE (CZID-63 follow-up): a managed CloudWatch log group for this lambda was reverted. It was
-# declared for bounded retention + CMK encryption, but in dev Lambda had already auto-created the
-# implicit `/aws/lambda/taxon-indexing-concurrency-manager-dev` group (no retention, no KMS), so
-# every apply failed with ResourceAlreadyExistsException -- which blocked deploying this lambda at
-# all. Adopting the existing group needs `terraform import`, and a declarative `import` block only
-# takes effect in a FULL plan; this repo deploys with `-target` (which skips import blocks), and a
-# full dev apply is unsafe (a large, destroy-carrying backlog). So the managed group is removed here
-# to unblock lambda deploys. The lambda still logs to the implicit auto-created group. Re-adopt the
-# group with retention + the workflows CMK once the dev backlog is reconciled (via a full apply that
-# processes an import block, or a one-off `terraform import`). Tracked as a follow-up.
+# CloudWatch log group for the concurrency-manager lambda (CZID-63): bounded retention + CMK
+# encryption instead of the implicit never-expiring, unencrypted group Lambda auto-creates.
+# In dev the implicit group already exists, so it is adopted via `terraform import`
+# (make import-log-groups) before the first managing apply -- a plain apply would hit
+# ResourceAlreadyExistsException, and an `import` block does not help here (this repo deploys
+# with `-target`, which skips import blocks). depends_on orders it before the function so a fresh
+# env never lets Lambda auto-create the implicit group first.
+resource "aws_cloudwatch_log_group" "taxon_indexing_concurrency_manager" {
+  #checkov:skip=CKV_AWS_338:90-day retention (var.log_retention_in_days) is the deliberate cost/policy choice for this lambda log group; CKV_AWS_338 wants >=1 year. Logs are KMS-encrypted via the workflows CMK (var.log_kms_key_arn).
+  name              = "/aws/lambda/taxon-indexing-concurrency-manager-${var.deployment_environment}"
+  retention_in_days = var.log_retention_in_days
+  kms_key_id        = var.log_kms_key_arn
+}
 
 resource "aws_lambda_function" "taxon_indexing_concurrency_manager" {
   function_name    = "taxon-indexing-concurrency-manager-${var.deployment_environment}"
@@ -82,4 +85,7 @@ resource "aws_lambda_function" "taxon_indexing_concurrency_manager" {
     }
   }
   role = aws_iam_role.taxon_indexing_concurrency_manager_role.arn
+
+  # Ensure the managed log group exists before the function can auto-create an implicit one.
+  depends_on = [aws_cloudwatch_log_group.taxon_indexing_concurrency_manager]
 }
