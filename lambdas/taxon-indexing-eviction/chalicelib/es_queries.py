@@ -12,7 +12,16 @@ logger.setLevel(logging.INFO)
 
 @functools.lru_cache(maxsize=None)
 def es():
-    return OpenSearch(config.get_parameters()["ES_HOST"], timeout=300)
+    # retry_on_timeout=True (opensearch-py defaults it to False) so a connect
+    # timeout to a rotated-out node ENI is retried onto a live node instead of
+    # failing the eviction run. czid-*-heatmap-es replaces nodes periodically.
+    # See platform-overhaul #723.
+    return OpenSearch(
+        config.get_parameters()["ES_HOST"],
+        timeout=300,
+        max_retries=3,
+        retry_on_timeout=True,
+    )
 
 
 def get_pipelines_being_deleted():
