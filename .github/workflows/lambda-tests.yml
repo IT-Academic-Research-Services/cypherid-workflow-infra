@@ -25,3 +25,20 @@ jobs:
           cache: pip
       - name: Run lambda unit tests
         run: bash lambdas/run_lambda_tests.sh
+
+  js-lambda-tests:
+    name: JS lambda unit tests (concurrency-manager)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Git clone the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install + test the concurrency-manager lambda
+        working-directory: lambdas/taxon-indexing-concurrency-manager
+        run: |
+          npm ci
+          npm test
