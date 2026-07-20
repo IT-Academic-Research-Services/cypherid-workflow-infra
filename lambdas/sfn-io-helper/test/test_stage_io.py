@@ -103,5 +103,93 @@ class TestIdseqDagIoMap(unittest.TestCase):
             self.assertIsNone(v)
 
 
+class TestIndexGenerationIoMap(unittest.TestCase):
+    # The seven cross-stage database names handed off between index-generation stages.
+    HANDOFF_NAMES = {
+        "nt",
+        "nr",
+        "accession2taxid_nucl_gb",
+        "accession2taxid_nucl_wgs",
+        "accession2taxid_pdb",
+        "accession2taxid_prot",
+        "taxdump",
+    }
+
+    def test_stage_order_is_the_pipeline_order(self):
+        self.assertEqual(
+            stage_io.index_generation_stages,
+            ["Download", "Compress", "Index"],
+        )
+
+    def test_stages_match_io_map_keys_and_order(self):
+        self.assertEqual(
+            stage_io.index_generation_stages,
+            list(stage_io.index_generation_io_map),
+        )
+
+    def test_download_takes_no_upstream_handoff(self):
+        # The first stage's inputs are optional NCBI URLs defaulted in the sub-WDL.
+        self.assertEqual(stage_io.index_generation_io_map["Download"], {})
+
+    def test_compress_reads_the_seven_download_outputs(self):
+        compress = stage_io.index_generation_io_map["Compress"]
+        self.assertEqual(
+            set(compress),
+            {f"download_out_{n}" for n in self.HANDOFF_NAMES},
+        )
+        # Each download_out_<X> resolves to the identically named Download output <X>.
+        for input_name, result_key in compress.items():
+            self.assertEqual(input_name, f"download_out_{result_key}")
+            self.assertIn(result_key, self.HANDOFF_NAMES)
+
+    def test_index_reads_the_seven_compress_outputs(self):
+        index = stage_io.index_generation_io_map["Index"]
+        self.assertEqual(
+            set(index),
+            {f"compress_out_{n}" for n in self.HANDOFF_NAMES},
+        )
+        for input_name, result_key in index.items():
+            self.assertEqual(input_name, f"compress_out_{result_key}")
+            self.assertIn(result_key, self.HANDOFF_NAMES)
+
+    def test_pipeline_for_stage_routes_each_family(self):
+        self.assertEqual(
+            stage_io._pipeline_for_stage("Compress"),
+            (stage_io.index_generation_stages, stage_io.index_generation_io_map),
+        )
+        self.assertEqual(
+            stage_io._pipeline_for_stage("NonHostAlignment"),
+            (stage_io.idseq_dag_stages, stage_io.idseq_dag_io_map),
+        )
+        self.assertEqual(stage_io._pipeline_for_stage("Run"), (None, None))
+
+    def test_is_index_generation_detects_wdl_uri_keys(self):
+        self.assertTrue(
+            stage_io._is_index_generation(
+                {
+                    "DOWNLOAD_WDL_URI": "s3://b/index-generation-v1/download.wdl",
+                    "COMPRESS_WDL_URI": "s3://b/index-generation-v1/compress.wdl",
+                    "INDEX_WDL_URI": "s3://b/index-generation-v1/index.wdl",
+                }
+            )
+        )
+        self.assertFalse(
+            stage_io._is_index_generation({"RUN_WDL_URI": "s3://b/default-v1/run.wdl"})
+        )
+        self.assertFalse(
+            stage_io._is_index_generation(
+                {"HOST_FILTER_WDL_URI": "s3://b/short-read-mngs-v1/host_filter.wdl"}
+            )
+        )
+
+
+class TestIndexGenerationUriKeys(unittest.TestCase):
+    def test_input_and_output_uri_keys(self):
+        self.assertEqual(stage_io.get_input_uri_key("Download"), "DOWNLOAD_INPUT_URI")
+        self.assertEqual(stage_io.get_output_uri_key("Download"), "DOWNLOAD_OUTPUT_URI")
+        self.assertEqual(stage_io.get_input_uri_key("Compress"), "COMPRESS_INPUT_URI")
+        self.assertEqual(stage_io.get_output_uri_key("Index"), "INDEX_OUTPUT_URI")
+
+
 if __name__ == "__main__":
     unittest.main()
