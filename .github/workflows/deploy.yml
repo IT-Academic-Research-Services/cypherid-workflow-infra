@@ -1,5 +1,29 @@
 name: CypherID Workflow Infra Deploy
-run-name: Deploy CypherID Workflow Infra to ${{ inputs.environment }}
+run-name: Deploy CypherID Workflow Infra to ${{ inputs.environment }}${{ inputs.plan-run-id && format(' (reviewed plan from run {0})', inputs.plan-run-id) || '' }}
+
+# CD HYGIENE (CZID-751). This workflow supports two apply paths, chosen by whether
+# plan-run-id is supplied:
+#
+#   1. LEGACY path (plan-run-id EMPTY, the default -- behavior UNCHANGED):
+#      `make deploy` runs `terraform apply` with TF_CLI_ARGS_apply=--auto-approve
+#      and NO plan linkage, so it applies whatever the live config wants at run
+#      time. This is the pre-existing behavior; it is left intact so nothing
+#      that relies on it breaks.
+#
+#   2. REVIEWED-APPLY path (plan-run-id SET -- OPT-IN, off by default):
+#      Downloads the exact `tf.plan` artifact produced by a prior "Plan only"
+#      run (plan_only.yml -> plan_call.yml) and runs `terraform apply tf.plan`.
+#      terraform applies ONLY the frozen, reviewed diff and refuses the saved
+#      plan outright if state has moved since it was generated. This mirrors
+#      web-infra's plan_all/apply_all run-id linkage model.
+#
+# Neither path auto-applies: both are workflow_dispatch, human-triggered. This
+# change adds path 2 as INERT/opt-in and does NOT enable any automatic apply.
+#
+# CAUTION: workflow-infra has a large pending-change backlog (see CZID-708, ~92
+# changes). Do NOT run a full apply of this repo blindly on either path. Review
+# the "Plan only" summary first; for the reviewed-apply path, pass that run's id
+# so the apply is exactly what was reviewed.
 
 on:
   workflow_dispatch:
@@ -16,7 +40,16 @@ on:
           plan-linkage, so it applies whatever the config wants at run time; scoping it is how a
           narrow change gets applied without dragging along unrelated pending drift. Plan the same
           targets with the "Plan only" workflow first and confirm the diff. Leave empty for a full
-          apply.
+          apply. IGNORED when plan-run-id is set (the reviewed plan already fixes its own scope).
+        required: false
+        type: string
+        default: ''
+      plan-run-id:
+        description: >-
+          OPT-IN reviewed-apply. Leave EMPTY (default) for the legacy make-deploy apply. Set it to
+          the GitHub Actions run id of a completed "Plan only" run to apply that run's exact,
+          reviewed tf.plan instead -- terraform applies only that frozen diff and refuses it if
+          state has drifted since. This is the safer, plan-linked path.
         required: false
         type: string
         default: ''
@@ -32,10 +65,15 @@ permissions:
 
 jobs:
   DeployTerraform:
+    name: Legacy apply (make deploy, --auto-approve)
+    # Runs ONLY when no plan-run-id is supplied, i.e. the default. This is the
+    # pre-existing path, left untouched; the opt-in reviewed-apply job below runs
+    # instead when a plan-run-id is given, so exactly one of the two ever runs.
+    if: ${{ inputs.plan-run-id == '' }}
     runs-on: ubuntu-latest
     # C4: gate the deploy by the GitHub Environment so prod requires the reviewer
     # approval configured on the Environment (protection rules land with #81). Was
-    # ungated — an auto-approve `terraform apply` behind only a shell branch/account
+    # ungated -- an auto-approve `terraform apply` behind only a shell branch/account
     # guard, with no environment: and no plan-linkage.
     environment: ${{ inputs.environment }}
     steps:
@@ -94,3 +132,102 @@ jobs:
           echo "TF_CLI_ARGS_apply=$TF_CLI_ARGS_apply"
 
           make deploy
+
+  ApplyReviewedPlan:
+    name: Reviewed apply (plan->apply linkage, opt-in)
+    # OPT-IN reviewed-apply path (CZID-751). Runs ONLY when a plan-run-id is
+    # supplied; DeployTerraform above runs when it is empty, so this workflow's
+    # default behavior is unchanged and this job is inert unless a reviewer
+    # deliberately passes a plan run id. It applies the EXACT tf.plan artifact
+    # from that "Plan only" run rather than make deploy's --auto-approve apply of
+    # whatever the live config wants -- terraform refuses a saved plan if state
+    # has moved since it was generated, so the reviewer approves a frozen diff.
+    if: ${{ inputs.plan-run-id != '' }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      # FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 matches plan_call.yml.
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Git clone the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Reconfigure Git to use HTTP authentication
+        run: |
+          git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+      - name: Install AWS CLI
+        uses: unfor19/install-aws-cli-action@f5b46b7f32cf5e7ebd652656c5036bf83dd1e60c # v1
+        with:
+          version: 2
+          verbose: false
+          arch: amd64
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          # Same per-env least-privilege apply role and profile as the legacy job.
+          # See the DeployTerraform job for why aws-profile is load-bearing.
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-apply
+          role-session-name: GitHub_to_AWS_via_FederatedOIDC
+          aws-region: ${{ env.AWS_REGION }}
+          aws-profile: idseq-${{ inputs.environment }}
+          output-env-credentials: true
+      - name: Sts GetCallerIdentity
+        run: |
+          aws sts get-caller-identity
+      - name: Read Terraform version (SSOT = .terraform-version)
+        id: tfver
+        run: echo "version=$(cat .terraform-version)" >> "$GITHUB_OUTPUT"
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ steps.tfver.outputs.version }}
+          terraform_wrapper: false
+      - name: Setup Terraform Environment
+        # Mirror plan_call.yml: source environment.<env> and forward the variables
+        # terraform needs (TF_DATA_DIR, TF_CLI_ARGS_init pointing at the S3 backend,
+        # etc.) to later steps. Every run: block is its own shell, so this must be
+        # forwarded via $GITHUB_ENV. AWS credentials are NOT forwarded here --
+        # configure-aws-credentials already published them.
+        run: |
+          set -x
+          source "environment.${{ inputs.environment }}"
+          set +x
+          echo "TF_DATA_DIR=$TF_DATA_DIR"
+          mkdir -p "$TF_DATA_DIR"
+          jq -n ".region=\"us-west-2\" | .bucket=env.TF_S3_BUCKET | .key=env.APP_NAME+env.DEPLOYMENT_ENVIRONMENT | .encrypt=true" > "$TF_DATA_DIR/aws_config.json"
+          jq . "$TF_DATA_DIR/aws_config.json"
+          for v in APP_HOME APP_NAME DEPLOYMENT_ENVIRONMENT TF_DATA_DIR TFSTATE_FILE \
+                   TF_CLI_ARGS_init TF_CLI_ARGS_output AWS_SDK_LOAD_CONFIG AWS_DEFAULT_REGION \
+                   AWS_ACCOUNT_ID AWS_ACCOUNT_ALIAS TF_S3_BUCKET DOCKER_REGISTRY \
+                   OWNER TF_VAR_owner TF_VAR_environment; do
+            printf '%s=%s\n' "$v" "${!v}" >> "$GITHUB_ENV"
+          done
+      - name: Package Lambdas and create Templates
+        # The saved plan references locally generated artifacts (lambda zips,
+        # chalice.tf.json, rendered templates). Regenerate them exactly as the plan
+        # run did so `terraform apply tf.plan` sees the same files. If a generated
+        # artifact is not byte-reproducible, terraform will reject the saved plan as
+        # stale -- which fails safe (it will not apply an unreviewed diff).
+        run: |
+          make package-lambdas templates
+      - name: Download the reviewed plan artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: plan
+          path: ${{ github.workspace }}
+          run-id: ${{ inputs.plan-run-id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Terraform Init and Apply the reviewed plan
+        run: |
+          terraform init -input=false
+          if [[ ! -f "${{ github.workspace }}/tf.plan" ]]; then
+            echo "::error::No tf.plan artifact found for run ${{ inputs.plan-run-id }}. Run a 'Plan only' for this environment and pass its run id."
+            exit 1
+          fi
+          echo "Applying the reviewed plan from run ${{ inputs.plan-run-id }}."
+          echo "terraform will refuse this saved plan if state has drifted since it was generated."
+          # No --auto-approve: a saved plan file is applied without a prompt by
+          # definition, and only the changes it froze -- never a fresh diff of the
+          # live config.
+          terraform apply -input=false "${{ github.workspace }}/tf.plan"
