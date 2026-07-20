@@ -148,10 +148,15 @@ resource "aws_batch_compute_environment" "index_generation_compute_environment" 
 
     subnets = length(data.aws_subnets.webservice_subnets) > 0 ? data.aws_subnets.webservice_subnets[0].ids : [for subnet in aws_subnet.idseq : subnet.id]
 
+    // On-demand compute. index-generation is currently ONE monolithic multi-hour
+    // miniwdl job on a single host, so a spot interruption would kill the whole
+    // rebuild -- spot is not safe here yet. bid_percentage and spot_iam_fleet_role
+    // are SPOT-only attributes; with type = "EC2" Terraform silently ignored them
+    // and the CE has always run on-demand, so removing them is non-regressive.
+    // Spot belongs later on the per-chunk indexing fan-out, where interruptions
+    // are cheap and checkpointable, not on this monolithic job.
     type                = "EC2"
     allocation_strategy = "BEST_FIT"
-    bid_percentage      = 100
-    spot_iam_fleet_role = aws_iam_role.idseq_batch_spot_fleet_service_role.arn
 
     launch_template {
       launch_template_name = aws_launch_template.index_generation_launch_template.name
