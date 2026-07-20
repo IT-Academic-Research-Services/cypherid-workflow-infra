@@ -58,12 +58,36 @@ module "swipe" {
     },
     "index-generation" : {
       path = "${path.module}/sfn_templates/index-generation.yml",
+      # Multi-stage index-generation (Lever 1, Track A): each phase routes to its own
+      # right-sized per-stage queue. The Index stage runs on the spot queue and falls back
+      # to the on-demand queue on a spot reclaim (see sfn_templates/index-generation.yml).
       extra_template_vars = {
-        "index_generation_job_queue_arn" : aws_batch_job_queue.index_generation_job_queue.arn,
+        "index_generation_download_job_queue_arn" : aws_batch_job_queue.index_generation["download"].arn,
+        "index_generation_compress_job_queue_arn" : aws_batch_job_queue.index_generation["compress"].arn,
+        "index_generation_index_spot_job_queue_arn" : aws_batch_job_queue.index_generation["index_spot"].arn,
+        "index_generation_index_on_demand_job_queue_arn" : aws_batch_job_queue.index_generation["index_ondemand"].arn,
       },
     },
   }
+  # Per-stage container memory (MB) defaults swipe injects as <Stage>SPOTMemory /
+  # <Stage>EC2Memory into the SFN input. Download/Compress/Index are the new index-generation
+  # stages (Lever 1, Track A); Run stays for swipe's built-in single-stage default-wdl
+  # machine; HostFilter/NonHostAlignment/Postprocess/Experimental are short-read-mngs. The
+  # start_index_generation lambda can still override these per run. Index seeds from PR-1
+  # per-task sizing; confirm against a profiling run before prod.
   stage_memory_defaults = {
+    Download : {
+      spot      = 14000
+      on_demand = 14000
+    },
+    Compress : {
+      spot      = 380000
+      on_demand = 380000
+    },
+    Index : {
+      spot      = 128000
+      on_demand = 250000
+    },
     Run : {
       spot      = 128000
       on_demand = 256000
