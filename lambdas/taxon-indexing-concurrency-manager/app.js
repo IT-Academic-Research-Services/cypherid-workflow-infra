@@ -50,15 +50,38 @@ async function invoke_taxon_indexing(pipeline_run_ids, background_id, concurrenc
             ).catch(err => err) // catch errors so that we can return the results of all requests in the final response
         ), 
     )
-    result.map(x => x.Payload = new TextDecoder().decode(x.Payload))
-    const errorResults = result.filter((x => x.FunctionError))
-    const successResults = result.filter((x => !x.FunctionError))
+    const { errorResults } = classifyResults(result)
     if (errorResults.length > 0) {
         console.error(errorResults)
-        throw new Error(`${errorResults.length} / ${successResults.length} pipeline runs failed to index. See logs for more details.`)
+        throw new Error(failureMessage(errorResults.length, result.length))
     }
     return result
-    
+
+}
+
+// Split the Promise.all results into failures vs successes. Two failure shapes:
+// (1) a worker Lambda that threw returns a 200 InvokeCommand response with
+// FunctionError set; (2) an invocation that hard-failed after retries (network /
+// throttle) was caught above by `.catch(err => err)` and is a plain Error with no
+// FunctionError. BOTH are failures -- the previous `filter(x => !x.FunctionError)`
+// miscounted the hard failures as successes. Payload only exists on real
+// InvokeCommand responses, so only decode those. Exported for unit tests.
+// See platform-overhaul 724.
+export function classifyResults(results) {
+    results.forEach(x => {
+        if (!(x instanceof Error) && x.Payload) {
+            x.Payload = new TextDecoder().decode(x.Payload)
+        }
+    })
+    const errorResults = results.filter(x => x instanceof Error || x.FunctionError)
+    const successResults = results.filter(x => !(x instanceof Error) && !x.FunctionError)
+    return { errorResults, successResults }
+}
+
+// failed / TOTAL. The old message used failed/succeeded, so a fully-failed batch
+// printed "11 / 0" -- which reads as "11 of 0" instead of "11 of 11".
+export function failureMessage(failedCount, total) {
+    return `${failedCount} / ${total} pipeline runs failed to index. See logs for more details.`
 }
 
 async function invoke_lambda(payload) {
