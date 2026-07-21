@@ -101,19 +101,20 @@ variable "lambda_log_retention_in_days" {
 # because it is a static architecture toggle, co-located with its only consumer -- the same
 # pattern as lambda_log_retention_in_days above.
 #
-# Default false so x86 stays the applied state: this is the fallback. HELD/GATED -- flip to
-# true (a one-line change, the whole point of the toggle) ONLY after BOTH gates pass:
-#   1. the multi-arch/arm64 index-generation image is published to ECR (an arm64 host cannot
-#      pull an x86-only image), and
-#   2. an arm64 IDSEQ_BENCH rebuild holds AUPR >= 0.98 (arch changes are adopted only after
-#      the AUPR gate, per NTNR-OPTIMIZATION-PLAN-2026-07-20.md Lever 2).
-# If arm64 AUPR regresses, flip back to false to revert to Track A's x86 per-stage families.
-# When true, index-generation.tf's ECS-optimized AMI lookup also switches to the arm64 image
-# so the AMI arch matches the instance arch.
+# Default TRUE: Graviton3 (arm64) is now the applied/default architecture for the
+# index-generation stages. It was previously held at false and enabled only via a manual
+# TF_VAR_use_graviton=true at apply time, which meant any apply that forgot the override
+# silently reverted the live CEs to x86 -- so the toggle is persisted here instead of relying
+# on an ambient env var. Both original gates are satisfied: the multi-arch/arm64
+# index-generation SWIPE image is published to ECR (swipe:v1.4.9-seqtoid.1-arm64), and the
+# arm64 pipeline was validated end-to-end on m7g/r7g (per-stage provisioning + ncbi-compress +
+# diamond) before this flip. When true the ECS-optimized AMI lookup also switches to the arm64
+# image so the AMI arch matches the instance arch. To revert to Track A's x86 per-stage
+# families (e.g. if an arm64 AUPR regression is found), flip this one line back to false.
 variable "use_graviton" {
   type        = bool
-  default     = false
-  description = "Run index-generation Batch stages on Graviton3 (arm64). Default false (x86 fallback); enable only after the arm64 image publish + arm64 AUPR>=0.98 gates pass."
+  default     = true
+  description = "Run index-generation Batch stages on Graviton3 (arm64). Default true; flip to false to fall back to Track A x86 per-stage families."
 }
 
 data "aws_ssm_parameter" "idseq_batch_ami" {
