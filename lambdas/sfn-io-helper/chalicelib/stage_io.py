@@ -258,6 +258,10 @@ def preprocess_sfn_input(sfn_state, aws_region, aws_account_id, state_machine_na
             f"{ecr_repo}/idseq-{workflow_name}:v{workflow_version}"
         )
         stage_input.setdefault("docker_image_id", default_docker_image_id)
-        stage_input.setdefault("s3_wd_uri", output_path)
+        if not _is_index_generation(sfn_state):
+            # index-gen sub-WDLs (download/compress/index) do not declare s3_wd_uri,
+            # so miniwdl would reject it at input validation. short-read-mngs and the
+            # single-stage "Run" workflows do declare String s3_wd_uri and rely on it.
+            stage_input.setdefault("s3_wd_uri", output_path)
         put_stage_input(sfn_state=sfn_state, stage=stage, stage_input=stage_input)
     return sfn_state

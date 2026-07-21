@@ -11,6 +11,7 @@
 
 import os
 import unittest
+from unittest import mock
 
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-west-2")
 
@@ -189,6 +190,113 @@ class TestIndexGenerationUriKeys(unittest.TestCase):
         self.assertEqual(stage_io.get_output_uri_key("Download"), "DOWNLOAD_OUTPUT_URI")
         self.assertEqual(stage_io.get_input_uri_key("Compress"), "COMPRESS_INPUT_URI")
         self.assertEqual(stage_io.get_output_uri_key("Index"), "INDEX_OUTPUT_URI")
+
+
+class TestPreprocessSfnInputS3WdUri(unittest.TestCase):
+    # preprocess_sfn_input writes each stage's input JSON to S3 via put_stage_input and
+    # reads only WDL-URI *strings* (get_workflow_name parses the URI locally, no network).
+    # We patch put_stage_input to capture the emitted per-stage inputs, so these tests run
+    # AWS-free like the rest of this module. They lock the contract that s3_wd_uri is
+    # injected for the WDLs that declare `String s3_wd_uri` (short-read-mngs / single-stage
+    # "Run") but NOT for the index-generation sub-WDLs (download/compress/index), which do
+    # not declare it and whose miniwdl input validation would otherwise reject it.
+
+    REGION = "us-west-2"
+    ACCOUNT_ID = "123456789012"
+
+    def _run(self, sfn_state, state_machine_name, memory_stages):
+        captured = {}
+
+        def _capture(sfn_state, stage, stage_input):
+            captured[stage] = stage_input
+
+        env = {}
+        for stage in memory_stages:
+            for compute_env in ("SPOT", "EC2"):
+                env[stage + compute_env + "MemoryDefault"] = "4096"
+        with mock.patch.object(stage_io, "put_stage_input", side_effect=_capture), \
+                mock.patch.dict(os.environ, env):
+            stage_io.preprocess_sfn_input(
+                sfn_state,
+                aws_region=self.REGION,
+                aws_account_id=self.ACCOUNT_ID,
+                state_machine_name=state_machine_name,
+            )
+        return captured
+
+    def test_index_generation_stages_get_no_s3_wd_uri(self):
+        # WDL URIs live in a seqtoid-workflows-* bucket, so get_workflow_name returns the
+        # key's dirname ("index-generation-v1"); the DOWNLOAD_/INDEX_WDL_URI keys make
+        # _is_index_generation True.
+        base = "s3://seqtoid-workflows-dev/index-generation-v1"
+        sfn_state = {
+            "OutputPrefix": "s3://out-bucket/runs/abc",
+            "Input": {},
+            "DOWNLOAD_WDL_URI": f"{base}/download.wdl",
+            "COMPRESS_WDL_URI": f"{base}/compress.wdl",
+            "INDEX_WDL_URI": f"{base}/index.wdl",
+        }
+        captured = self._run(
+            sfn_state,
+            state_machine_name="idseq-index-generation-main-1",
+            memory_stages=stage_io.index_generation_stages,
+        )
+
+        self.assertEqual(set(captured), {"Download", "Compress", "Index"})
+        for stage, stage_input in captured.items():
+            self.assertNotIn(
+                "s3_wd_uri",
+                stage_input,
+                f"index-generation stage {stage} must not carry s3_wd_uri",
+            )
+            # docker_image_id is still injected for every stage.
+            self.assertIn("docker_image_id", stage_input)
+
+    def test_short_read_mngs_stages_still_get_s3_wd_uri(self):
+        # No DOWNLOAD_/INDEX_WDL_URI keys -> not index-generation; the idseq-*-main-N state
+        # machine name selects the idseq_dag stages.
+        base = "s3://seqtoid-workflows-dev/short-read-mngs-v1"
+        sfn_state = {
+            "OutputPrefix": "s3://out-bucket/runs/abc",
+            "Input": {},
+            "HOST_FILTER_WDL_URI": f"{base}/host_filter.wdl",
+        }
+        captured = self._run(
+            sfn_state,
+            state_machine_name="idseq-mngs-main-1",
+            memory_stages=stage_io.idseq_dag_stages,
+        )
+
+        expected_path = os.path.join(sfn_state["OutputPrefix"], "short-read-mngs-v1")
+        self.assertEqual(
+            set(captured),
+            {"HostFilter", "NonHostAlignment", "Postprocess", "Experimental"},
+        )
+        for stage, stage_input in captured.items():
+            self.assertEqual(
+                stage_input.get("s3_wd_uri"),
+                expected_path,
+                f"short-read-mngs stage {stage} must carry s3_wd_uri",
+            )
+
+    def test_single_stage_run_workflow_gets_s3_wd_uri(self):
+        # The default single-stage "Run" path (neither index-generation nor idseq-dag)
+        # also declares s3_wd_uri and must keep receiving it.
+        base = "s3://seqtoid-workflows-dev/consensus-genome-v1"
+        sfn_state = {
+            "OutputPrefix": "s3://out-bucket/runs/abc",
+            "Input": {},
+            "RUN_WDL_URI": f"{base}/run.wdl",
+        }
+        captured = self._run(
+            sfn_state,
+            state_machine_name="cg-wdl-1",
+            memory_stages=["Run"],
+        )
+
+        expected_path = os.path.join(sfn_state["OutputPrefix"], "consensus-genome-v1")
+        self.assertEqual(set(captured), {"Run"})
+        self.assertEqual(captured["Run"].get("s3_wd_uri"), expected_path)
 
 
 if __name__ == "__main__":
