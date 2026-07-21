@@ -164,11 +164,8 @@ def read_state_from_s3(sfn_state, current_state):
     # If the stage succeeded, don't throw an error
     if not sfn_state.get("BatchJobDetails", {}).get(stage):
         if batch_job_error and next(iter(batch_job_error)).startswith(stage):
-            # A failed stage does not always leave an {error, cause} shaped output.json
-            # (e.g. the container dies before writing one). Degrade gracefully so the real
-            # Batch failure surfaces instead of masking it with a KeyError.
-            error_type = type(stage_output.get("error", "StageFailed"), (Exception,), dict())
-            raise error_type(stage_output.get("cause", stage_output.get("message", f"{stage} stage failed; see Batch job logs")))
+            error_type = type(stage_output["error"], (Exception,), dict())
+            raise error_type(stage_output["cause"])
 
     # Multi-stage pipelines (short-read-mngs idseq_dag, index-generation) namespace each
     # workflow output as `<workflow_name>.<output>`; strip that prefix so the I/O map can
