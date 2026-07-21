@@ -6,8 +6,8 @@ variable "app_name" {
 variable "owner" { type = string }
 variable "use_graviton" {
   type        = bool
-  default     = false
-  description = "Run index-generation Batch stages on Graviton3 (arm64). Passthrough to module.idseq; enable only after the arm64 image publish + arm64 AUPR>=0.98 gates pass."
+  default     = true
+  description = "Run index-generation Batch stages on Graviton3 (arm64). Passthrough to module.idseq. Default true: arm64 is the applied state (the index-gen CEs run m7g/r7g); this is the value that reaches the module, so it -- not the module-level default -- is what actually selects the arch. Flip to false to fall back to Track A x86."
 }
 
 terraform {
