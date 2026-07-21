@@ -99,8 +99,11 @@ def read_state_from_s3(sfn_state, current_state):
     # If the stage succeeded, don't throw an error
     if not sfn_state.get("BatchJobDetails", {}).get(stage):
         if batch_job_error and next(iter(batch_job_error)).startswith(stage):
-            error_type = type(stage_output["error"], (Exception,), dict())
-            raise error_type(stage_output["cause"])
+            # A failed stage does not always leave an {error, cause} shaped output.json
+            # (e.g. the container dies before writing one). Degrade gracefully so the real
+            # Batch failure surfaces instead of masking it with a KeyError.
+            error_type = type(stage_output.get("error", "StageFailed"), (Exception,), dict())
+            raise error_type(stage_output.get("cause", stage_output.get("message", f"{stage} stage failed; see Batch job logs")))
 
     if stage in idseq_dag_stages:
         stage_output = {
@@ -150,7 +153,7 @@ def get_workflow_name(sfn_state):
             #  so we again hardcode it!
             if (
                 s3_object(v).bucket_name == "cypherid-samples-deleteme"
-                or s3_object(v).bucket_name.starts_with("seqtoid-workflows-")
+                or s3_object(v).bucket_name.startswith("seqtoid-workflows-")
             ):
                 return os.path.dirname(s3_object(v).key)
             else:
