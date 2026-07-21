@@ -66,6 +66,12 @@ module "swipe" {
         "index_generation_compress_job_queue_arn" : aws_batch_job_queue.index_generation["compress"].arn,
         "index_generation_index_spot_job_queue_arn" : aws_batch_job_queue.index_generation["index_spot"].arn,
         "index_generation_index_on_demand_job_queue_arn" : aws_batch_job_queue.index_generation["index_ondemand"].arn,
+        # Graviton (Lever 2, CZID-776): override the shared amd64 swipe_main job-def with the
+        # dedicated arm64 job-def for index-generation only. swipe-sfn renders the template with
+        # merge({batch_job_definition_name = <swipe_main>...}, extra_template_vars), and merge's
+        # second arg wins, so this replaces batch_job_definition_name for THIS SFN alone. The
+        # arm64 CEs (r7g/m7g) can only exec the arm64 SWIPE runner; short-read-mngs is untouched.
+        "batch_job_definition_name" : aws_batch_job_definition.index_generation_arm64.name,
       },
     },
   }

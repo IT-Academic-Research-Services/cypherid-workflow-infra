@@ -4,6 +4,11 @@ variable "app_name" {
   default = "idseq"
 }
 variable "owner" { type = string }
+variable "use_graviton" {
+  type        = bool
+  default     = false
+  description = "Run index-generation Batch stages on Graviton3 (arm64). Passthrough to module.idseq; enable only after the arm64 image publish + arm64 AUPR>=0.98 gates pass."
+}
 
 terraform {
   # required_version + required_providers live in versions.tf (CZID-169 SSOT).
@@ -36,7 +41,8 @@ provider "aws" {
 }
 
 module "idseq" {
-  source = "./terraform"
+  source       = "./terraform"
+  use_graviton = var.use_graviton
 }
 
 output "idseq" {
