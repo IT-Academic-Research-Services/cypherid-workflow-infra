@@ -12,14 +12,34 @@ Content-Type: text/cloud-boothook; charset="us-ascii"
 # The monolithic index-generation box RAID0'd 4 x 16 TB volumes into 64 TB because one host
 # ran every phase end-to-end. The per-stage boxes each keep only their own working set on a
 # single right-sized gp3 volume (Lever 1), so there is no RAID here -- just format+mount the
-# one attached scratch device. Glob the secondary EBS device so we do not depend on the
-# in-guest device name (NVMe remapping) matching the launch-template block-device name.
+# one attached scratch device.
+#
+# Find that device by STATE, not by name. The launch template requests the scratch volume as
+# /dev/sdf, but on Nitro/Graviton hosts EBS volumes surface as NVMe (/dev/nvme*n1) and the
+# /dev/sdf alias is not present this early in a cloud-boothook -- so the old `ls /dev/sd?`
+# glob matched nothing on arm64, the volume was never mounted, and the download filled the
+# small root volume instead (running out of space at ~256 GB). Instead pick the one WHOLE
+# disk that has no mountpoint anywhere in its tree: the root disk always has "/" mounted under
+# it, so it is skipped, leaving the fresh, unformatted scratch volume. This is arch-agnostic
+# (works for x86 and arm64 Nitro alike). Wait briefly in case udev has not settled yet.
 
 yum install -y amazon-ssm-agent
 
-scratch_device=$(ls /dev/sd? 2>/dev/null | head -n1 || true)
+scratch_device=""
+for _ in $(seq 1 30); do
+    for dev in $(lsblk -dpno NAME); do
+        if [ -z "$(lsblk -no MOUNTPOINT "$dev" | tr -d '[:space:]')" ]; then
+            scratch_device="$dev"
+            break
+        fi
+    done
+    [ -n "$scratch_device" ] && break
+    sleep 2
+done
+
 if [ -n "$scratch_device" ] && [ ! -d /mnt/lost+found ]; then
     mkfs.xfs -f "$scratch_device"
+    mkdir -p /mnt
     mount "$scratch_device" /mnt
 fi
 
