@@ -1,0 +1,195 @@
+name: targeted-apply (scoped -target apply from any branch)
+run-name: Targeted apply in ${{ inputs.environment }} on ${{ github.ref_name }} [${{ inputs.targets }}] by ${{ github.actor }}
+
+# A bounded, any-branch scoped apply. Unlike deploy.yml (whose `dev` GitHub Environment
+# only admits main/integration), this runs from ANY branch because its safety does not
+# come from a branch restriction -- it comes from two things:
+#
+#   1. `targets` is REQUIRED. The workflow refuses to run without an explicit
+#      space-separated list of terraform resource addresses, so it can NEVER apply the
+#      whole configuration (no accidental 92-change backlog apply).
+#   2. The apply job runs under the `<env>-targeted` GitHub Environment, which has NO
+#      branch restriction but DOES require a reviewer -- so every apply pauses for a
+#      human approval in the GitHub UI. The plan is rendered first (ungated) so the
+#      reviewer sees the exact scoped diff before approving.
+#
+# Auth: the read-only plan job assumes czid-<env>-gh-actions-plan (trust `*`, any branch,
+# no environment). The write job assumes czid-<env>-gh-actions-apply, which trusts the
+# `environment:<env>*` sub -- matched by the `<env>-targeted` environment. Both roles are
+# the same ones deploy.yml / plan_only.yml already use.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment (dev only for now).
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+      targets:
+        description: >-
+          REQUIRED. Space-separated terraform resource addresses to scope the apply to
+          (e.g. "aws_launch_template.index_generation aws_batch_compute_environment.index_generation").
+          The apply touches ONLY these (-target). Empty is rejected.
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: targeted-apply-${{ inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-west-2
+  # Pass the user input through the environment (not inline ${{ }}) so it cannot be
+  # interpreted as shell by the runner.
+  TARGETS: ${{ inputs.targets }}
+
+jobs:
+  plan:
+    name: Scoped plan (read-only, ungated)
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Require a non-empty target list
+        run: |
+          if [[ -z "${TARGETS// }" ]]; then
+            echo "::error::'targets' is required. This workflow only performs scoped -target applies; refusing to run without an explicit target list."
+            exit 1
+          fi
+          echo "Scoping to:"; printf '  %s\n' $TARGETS
+      - name: Git clone the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Reconfigure Git to use HTTP authentication
+        run: git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+      - name: Install AWS CLI
+        uses: unfor19/install-aws-cli-action@f5b46b7f32cf5e7ebd652656c5036bf83dd1e60c # v1
+        with:
+          version: 2
+          verbose: false
+          arch: amd64
+      - name: configure aws credentials (read-only plan role)
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-plan
+          role-session-name: GitHub_to_AWS_via_FederatedOIDC_targeted_plan
+          aws-region: ${{ env.AWS_REGION }}
+          aws-profile: idseq-${{ inputs.environment }}
+          output-env-credentials: true
+      - name: Read Terraform version (SSOT = .terraform-version)
+        id: tfver
+        run: echo "version=$(cat .terraform-version)" >> "$GITHUB_OUTPUT"
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ steps.tfver.outputs.version }}
+          terraform_wrapper: false
+      - name: Setup Terraform Environment
+        run: |
+          source "environment.${{ inputs.environment }}"
+          mkdir -p "$TF_DATA_DIR"
+          jq -n ".region=\"us-west-2\" | .bucket=env.TF_S3_BUCKET | .key=env.APP_NAME+env.DEPLOYMENT_ENVIRONMENT | .encrypt=true" > "$TF_DATA_DIR/aws_config.json"
+          for v in APP_HOME APP_NAME DEPLOYMENT_ENVIRONMENT TF_DATA_DIR TFSTATE_FILE \
+                   TF_CLI_ARGS_init TF_CLI_ARGS_output AWS_SDK_LOAD_CONFIG AWS_DEFAULT_REGION \
+                   AWS_ACCOUNT_ID AWS_ACCOUNT_ALIAS TF_S3_BUCKET DOCKER_REGISTRY \
+                   OWNER TF_VAR_owner TF_VAR_environment; do
+            printf '%s=%s\n' "$v" "${!v}" >> "$GITHUB_ENV"
+          done
+      - name: Package Lambdas and create Templates
+        run: make package-lambdas templates
+      - name: Terraform Init + scoped Plan
+        run: |
+          terraform init -input=false
+          targs=()
+          for t in $TARGETS; do targs+=("-target=$t"); done
+          echo "terraform plan ${targs[*]}"
+          terraform plan -input=false "${targs[@]}" -out=tf.plan | tee plan.txt
+          {
+            echo "### Scoped plan for \`$TARGETS\`"
+            echo '```'
+            terraform show -no-color tf.plan | tail -c 60000
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the scoped plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tf-plan
+          path: |
+            tf.plan
+          retention-days: 3
+
+  apply:
+    name: Scoped apply (reviewer-gated)
+    needs: plan
+    runs-on: ubuntu-latest
+    # No branch restriction on this environment -- the gate is a required reviewer.
+    # The `environment:<env>-targeted` OIDC sub is what admits czid-<env>-gh-actions-apply.
+    environment: ${{ inputs.environment }}-targeted
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Git clone the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Reconfigure Git to use HTTP authentication
+        run: git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+      - name: Install AWS CLI
+        uses: unfor19/install-aws-cli-action@f5b46b7f32cf5e7ebd652656c5036bf83dd1e60c # v1
+        with:
+          version: 2
+          verbose: false
+          arch: amd64
+      - name: configure aws credentials (apply role)
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-apply
+          role-session-name: GitHub_to_AWS_via_FederatedOIDC_targeted_apply
+          aws-region: ${{ env.AWS_REGION }}
+          aws-profile: idseq-${{ inputs.environment }}
+          output-env-credentials: true
+      - name: Read Terraform version (SSOT = .terraform-version)
+        id: tfver
+        run: echo "version=$(cat .terraform-version)" >> "$GITHUB_OUTPUT"
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ steps.tfver.outputs.version }}
+          terraform_wrapper: false
+      - name: Setup Terraform Environment
+        run: |
+          source "environment.${{ inputs.environment }}"
+          mkdir -p "$TF_DATA_DIR"
+          jq -n ".region=\"us-west-2\" | .bucket=env.TF_S3_BUCKET | .key=env.APP_NAME+env.DEPLOYMENT_ENVIRONMENT | .encrypt=true" > "$TF_DATA_DIR/aws_config.json"
+          for v in APP_HOME APP_NAME DEPLOYMENT_ENVIRONMENT TF_DATA_DIR TFSTATE_FILE \
+                   TF_CLI_ARGS_init TF_CLI_ARGS_output AWS_SDK_LOAD_CONFIG AWS_DEFAULT_REGION \
+                   AWS_ACCOUNT_ID AWS_ACCOUNT_ALIAS TF_S3_BUCKET DOCKER_REGISTRY \
+                   OWNER TF_VAR_owner TF_VAR_environment; do
+            printf '%s=%s\n' "$v" "${!v}" >> "$GITHUB_ENV"
+          done
+      - name: Package Lambdas and create Templates
+        # Regenerate the local artifacts (lambda zips, rendered templates) byte-identically
+        # to the plan run so terraform accepts the saved plan; if they differ it rejects
+        # the plan as stale -- which fails safe.
+        run: make package-lambdas templates
+      - name: Download the scoped plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tf-plan
+          path: ${{ github.workspace }}
+      - name: Terraform Init + Apply the saved scoped plan
+        run: |
+          terraform init -input=false
+          if [[ ! -f tf.plan ]]; then
+            echo "::error::No tf.plan found from the plan job."
+            exit 1
+          fi
+          echo "Applying the reviewed scoped plan. Terraform refuses it if state drifted since planning."
+          terraform apply -input=false tf.plan
