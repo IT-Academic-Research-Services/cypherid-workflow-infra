@@ -62,7 +62,8 @@ jobs:
             echo "::error::'targets' is required. This workflow only performs scoped -target applies; refusing to run without an explicit target list."
             exit 1
           fi
-          echo "Scoping to:"; printf '  %s\n' $TARGETS
+          read -ra _targets <<< "$TARGETS"
+          echo "Scoping to:"; printf '  %s\n' "${_targets[@]}"
       - name: Git clone the repository
         uses: actions/checkout@v6
         with:
@@ -107,8 +108,9 @@ jobs:
       - name: Terraform Init + scoped Plan
         run: |
           terraform init -input=false
+          read -ra _targets <<< "$TARGETS"
           targs=()
-          for t in $TARGETS; do targs+=("-target=$t"); done
+          for t in "${_targets[@]}"; do targs+=("-target=$t"); done
           echo "terraform plan ${targs[*]}"
           terraform plan -input=false "${targs[@]}" -out=tf.plan | tee plan.txt
           {
