@@ -1,5 +1,5 @@
 module "swipe" {
-  source = "github.com/IT-Academic-Research-Services/swipe?ref=v1.4.9-ucsf.2"
+  source = "github.com/IT-Academic-Research-Services/swipe?ref=v1.4.9-ucsf.3"
   tags = {
     Name = "swipe"
   }
