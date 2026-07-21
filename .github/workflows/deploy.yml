@@ -4,11 +4,15 @@ run-name: Deploy CypherID Workflow Infra to ${{ inputs.environment }}${{ inputs.
 # CD HYGIENE (CZID-751). This workflow supports two apply paths, chosen by whether
 # plan-run-id is supplied:
 #
-#   1. LEGACY path (plan-run-id EMPTY, the default -- behavior UNCHANGED):
-#      `make deploy` runs `terraform apply` with TF_CLI_ARGS_apply=--auto-approve
-#      and NO plan linkage, so it applies whatever the live config wants at run
-#      time. This is the pre-existing behavior; it is left intact so nothing
-#      that relies on it breaks.
+#   1. DEFAULT path (plan-run-id EMPTY, the default):
+#      Runs the same prep as `make deploy` (package-lambdas, templates, init) but
+#      plans to a SAVED plan file, runs a destroy guard over it, then applies that
+#      exact saved plan. The guard fails the run if the plan would delete (destroy
+#      or replace) any resource, unless allow_destroy=true is passed. This replaces
+#      the previous unguarded `terraform apply --auto-approve` of the live config,
+#      which auto-approved accidental destroys. -target scoping still works (it is
+#      applied to the plan step). Behavior is otherwise unchanged: same prep, same
+#      diff (frozen a moment earlier), just gated on deletes.
 #
 #   2. REVIEWED-APPLY path (plan-run-id SET -- OPT-IN, off by default):
 #      Downloads the exact `tf.plan` artifact produced by a prior "Plan only"
@@ -44,6 +48,17 @@ on:
         required: false
         type: string
         default: ''
+      allow_destroy:
+        description: >-
+          Destroy guard override for the default (legacy) apply path. That path now plans to a saved
+          plan file and REFUSES to apply if any resource would be deleted -- a pure destroy, or the
+          delete half of a replace -- unless this is set to true. Leave false for normal deploys; set
+          true only after reviewing the addresses the failed run printed and confirming the
+          destroy/replace is intended. Has no effect on the reviewed-apply (plan-run-id) path, which
+          already applies a separately reviewed, frozen plan.
+        required: false
+        type: boolean
+        default: false
       plan-run-id:
         description: >-
           OPT-IN reviewed-apply. Leave EMPTY (default) for the legacy make-deploy apply. Set it to
@@ -65,16 +80,17 @@ permissions:
 
 jobs:
   DeployTerraform:
-    name: Legacy apply (make deploy, --auto-approve)
-    # Runs ONLY when no plan-run-id is supplied, i.e. the default. This is the
-    # pre-existing path, left untouched; the opt-in reviewed-apply job below runs
-    # instead when a plan-run-id is given, so exactly one of the two ever runs.
+    name: Default apply (plan -> destroy guard -> apply saved plan)
+    # Runs ONLY when no plan-run-id is supplied, i.e. the default. The opt-in
+    # reviewed-apply job below runs instead when a plan-run-id is given, so exactly
+    # one of the two ever runs.
     if: ${{ inputs.plan-run-id == '' }}
     runs-on: ubuntu-latest
     # C4: gate the deploy by the GitHub Environment so prod requires the reviewer
     # approval configured on the Environment (protection rules land with #81). Was
     # ungated -- an auto-approve `terraform apply` behind only a shell branch/account
-    # guard, with no environment: and no plan-linkage.
+    # guard, with no environment: and no plan-linkage. It now also carries a destroy
+    # guard (see the "Deploy dev" step) so an accidental delete is not auto-approved.
     environment: ${{ inputs.environment }}
     steps:
       - name: Git clone the repository
@@ -114,24 +130,62 @@ jobs:
     #     run: |
     #       jq -r . "$GITHUB_EVENT_PATH"
       - name: Deploy dev
+        # Inputs are passed through env (NOT interpolated into the shell) so a value
+        # like targets can never break out of the script -- injection-safe.
+        env:
+          TARGETS: ${{ inputs.targets }}
+          ALLOW_DESTROY: ${{ inputs.allow_destroy }}
         run: |
           #trap 'scripts/report_deployment_status.sh failure' ERR
           #scripts/report_deployment_status.sh in_progress "Starting deployment"
           source scripts/init_ci_runner.sh
 
-          # Optional -target scoping. init_ci_runner.sh sets TF_CLI_ARGS_apply=--auto-approve, so
-          # append rather than assign, and do it after sourcing or it gets overwritten.
-          if [[ -n "${{ inputs.targets }}" ]]; then
-            for t in ${{ inputs.targets }}; do
-              TF_CLI_ARGS_apply="$TF_CLI_ARGS_apply -target=$t"
+          # Optional -target scoping, read from $TARGETS (env, injection-safe). Applied to the PLAN
+          # step below; the saved plan then carries its own scope into apply, so we do NOT push
+          # -target through TF_CLI_ARGS_apply anymore.
+          TARGET_ARGS=""
+          if [[ -n "$TARGETS" ]]; then
+            for t in $TARGETS; do
+              TARGET_ARGS="$TARGET_ARGS -target=$t"
             done
-            export TF_CLI_ARGS_apply
-            echo "SCOPED APPLY -- terraform will touch only the targets below, not the full config:"
-            printf '  %s\n' ${{ inputs.targets }}
+            echo "SCOPED PLAN/APPLY -- terraform will touch only the targets below, not the full config:"
+            # shellcheck disable=SC2086  # intentional word-split: one line per target
+            printf '  %s\n' $TARGETS
           fi
-          echo "TF_CLI_ARGS_apply=$TF_CLI_ARGS_apply"
 
-          make deploy
+          # Same prep as `make deploy` (package lambda zips, render templates, terraform init) but
+          # WITHOUT its `terraform apply`: we plan to a saved file, guard it, then apply that file so
+          # what the guard checked is exactly what applies.
+          make package-lambdas templates init-tf
+
+          # Freeze the diff so the destroy guard inspects EXACTLY what will apply.
+          # shellcheck disable=SC2086  # intentional word-split: TARGET_ARGS is a list of -target flags
+          terraform plan -out=tfplan $TARGET_ARGS
+          terraform show -json tfplan > plan.json
+
+          # --- Destroy guard ---
+          # Fail if the saved plan would delete anything -- a pure destroy OR the delete half of a
+          # replace (.change.actions contains "delete") -- unless allow_destroy=true was passed to
+          # this dispatch. Mirrors web-infra apply_all's guard, adapted to this single saved-plan
+          # shape. `[]?` tolerates a plan.json with no resource_changes (empty/no-op plan).
+          delete_count=$(jq '[.resource_changes[]? | select(.change.actions | index("delete"))] | length' plan.json)
+          echo "destroy guard: $delete_count resource(s) with a delete action in the plan for ${DEPLOYMENT_ENVIRONMENT}"
+          if [[ "$delete_count" -gt 0 ]]; then
+            if [[ "$ALLOW_DESTROY" == "true" ]]; then
+              echo "::warning::Destroy guard OVERRIDDEN (allow_destroy=true): applying despite $delete_count destroy/replace action(s) in ${DEPLOYMENT_ENVIRONMENT}:"
+              jq -r '.resource_changes[]? | select(.change.actions | index("delete")) | "::warning::  destroy/replace: \(.address) [\(.change.actions | join(","))]"' plan.json
+            else
+              echo "::error::Destroy guard: the plan for ${DEPLOYMENT_ENVIRONMENT} would destroy or replace $delete_count resource(s). This is blocked by default. Re-run this workflow with allow_destroy=true (after reviewing the addresses below) to proceed."
+              jq -r '.resource_changes[]? | select(.change.actions | index("delete")) | "::error::  would destroy/replace: \(.address) [\(.change.actions | join(","))]"' plan.json
+              exit 1
+            fi
+          fi
+
+          # Apply the SAVED plan (not a fresh diff of the live config). A saved plan needs no
+          # --auto-approve -- passing the plan file IS the approval -- so drop the one
+          # init_ci_runner.sh exported to keep the command clean.
+          unset TF_CLI_ARGS_apply
+          terraform apply tfplan
 
   ApplyReviewedPlan:
     name: Reviewed apply (plan->apply linkage, opt-in)
