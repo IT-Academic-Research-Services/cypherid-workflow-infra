@@ -53,7 +53,8 @@
 #     AWS_DEFAULT_REGION     = var.AWS_DEFAULT_REGION,
 #     AWS_ACCOUNT_ID         = var.AWS_ACCOUNT_ID,
 #     DEPLOYMENT_ENVIRONMENT = var.DEPLOYMENT_ENVIRONMENT,
-#     S3_WORKFLOWS_BUCKET    = data.aws_s3_bucket.workflows.bucket
+#     S3_WORKFLOWS_BUCKET    = data.aws_s3_bucket.workflows.bucket,
+#     S3_BENCH_BUCKET        = aws_s3_bucket.benchmark.bucket
 #   })
 # }
 
