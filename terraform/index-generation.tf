@@ -208,6 +208,12 @@ resource "aws_launch_template" "index_generation" {
   name      = "${local.service_name}-${each.key}-batch-${local.launch_template_user_data_hash}"
   user_data = filebase64(local.launch_template_user_data_file)
 
+  # Make each new launch-template version the DEFAULT so the Batch compute environment (which
+  # references this template by name, i.e. its default version) actually picks up changes -- e.g.
+  # the download scratch bump. Without this, a config change creates a new version but the CE keeps
+  # launching instances from the stale default (the 500 GB -> 2 TB download fix would not take).
+  update_default_version = true
+
   # NOTE[JH]: This setting makes IMDSv2 required. Any software that needs to talk to the metadata service
   # needs to do so using the v2 endpoint.
   # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html
