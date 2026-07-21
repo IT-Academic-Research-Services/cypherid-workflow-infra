@@ -16,6 +16,8 @@
         "arn:aws:s3:::aegea-batch-jobs-${AWS_ACCOUNT_ID}/*",
         "arn:aws:s3:::idseq-${DEPLOYMENT_ENVIRONMENT}-*",
         "arn:aws:s3:::idseq-${DEPLOYMENT_ENVIRONMENT}-*/*",
+        "arn:aws:s3:::${S3_BENCH_BUCKET}",
+        "arn:aws:s3:::${S3_BENCH_BUCKET}/*",
         "arn:aws:s3:::idseq-bench",
         "arn:aws:s3:::idseq-bench/*"
       ]

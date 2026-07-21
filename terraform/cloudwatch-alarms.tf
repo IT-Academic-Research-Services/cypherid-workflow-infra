@@ -128,14 +128,18 @@ resource "aws_cloudwatch_metric_alarm" "sfn_execution_duration_high" {
   alarm_actions = local.pipeline_alarm_actions
 }
 
-# --- Batch: failed jobs (index-generation queue this repo owns) --------------
+# --- Batch: failed jobs (index-generation per-stage queues this repo owns) ----
+# One alarm per stage queue (download / compress / index_spot / index_ondemand): the
+# multi-stage pipeline replaced the single index-generation queue with per-phase queues.
 resource "aws_cloudwatch_metric_alarm" "batch_index_generation_failed_jobs" {
-  alarm_name        = "idseq-${var.DEPLOYMENT_ENVIRONMENT}-batch-index-generation-failed-jobs"
-  alarm_description = "AWS Batch failed jobs on the index-generation queue — pipeline ${var.DEPLOYMENT_ENVIRONMENT}."
+  for_each = aws_batch_job_queue.index_generation
+
+  alarm_name        = "idseq-${var.DEPLOYMENT_ENVIRONMENT}-batch-index-generation-${each.key}-failed-jobs"
+  alarm_description = "AWS Batch failed jobs on the index-generation ${each.key} queue — pipeline ${var.DEPLOYMENT_ENVIRONMENT}."
 
   namespace   = "AWS/Batch"
   metric_name = "FailedJobs"
-  dimensions  = { JobQueue = aws_batch_job_queue.index_generation_job_queue.name }
+  dimensions  = { JobQueue = each.value.name }
 
   statistic           = "Sum"
   period              = 300
@@ -179,10 +183,12 @@ locals {
       title  = "Batch index-generation — jobs"
       region = var.AWS_DEFAULT_REGION
       view   = "timeSeries"
-      metrics = [
-        ["AWS/Batch", "SubmittedJobs", "JobQueue", aws_batch_job_queue.index_generation_job_queue.name],
-        ["AWS/Batch", "FailedJobs", "JobQueue", aws_batch_job_queue.index_generation_job_queue.name],
-      ]
+      metrics = flatten([
+        for k, q in aws_batch_job_queue.index_generation : [
+          ["AWS/Batch", "SubmittedJobs", "JobQueue", q.name],
+          ["AWS/Batch", "FailedJobs", "JobQueue", q.name],
+        ]
+      ])
     }
   }
 

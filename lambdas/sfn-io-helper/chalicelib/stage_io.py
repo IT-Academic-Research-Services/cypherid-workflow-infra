@@ -65,6 +65,71 @@ idseq_dag_io_map = collections.OrderedDict(
 
 idseq_dag_stages = list(idseq_dag_io_map)
 
+# Multi-stage index-generation (Lever 1, Track A). The index-generation SFN
+# (terraform/sfn_templates/index-generation.yml) runs three right-sized phase stages --
+# Download -> Compress -> Index -- each a whole sub-WDL (download.wdl / compress.wdl /
+# index.wdl in seqtoid-workflows). Mirroring idseq_dag_io_map above, this maps each stage's
+# cross-stage `<prev>_out_<name>` input to the identically named output of the immediately
+# preceding stage (the 1:1 name map defined by index-generation-STAGE-SPLIT.md). Download
+# takes no upstream handoff (its inputs are optional NCBI URLs defaulted in the sub-WDL);
+# Compress reads the seven Download outputs; Index reads the seven Compress outputs. The
+# accession2taxid_* + taxdump small files are passed through Compress unchanged so the
+# linear chain only ever hands off to the immediately following stage.
+index_generation_io_map = collections.OrderedDict(
+    [
+        ("Download", {}),
+        (
+            "Compress",
+            {
+                "download_out_nt": "nt",
+                "download_out_nr": "nr",
+                "download_out_accession2taxid_nucl_gb": "accession2taxid_nucl_gb",
+                "download_out_accession2taxid_nucl_wgs": "accession2taxid_nucl_wgs",
+                "download_out_accession2taxid_pdb": "accession2taxid_pdb",
+                "download_out_accession2taxid_prot": "accession2taxid_prot",
+                "download_out_taxdump": "taxdump",
+            },
+        ),
+        (
+            "Index",
+            {
+                "compress_out_nt": "nt",
+                "compress_out_nr": "nr",
+                "compress_out_accession2taxid_nucl_gb": "accession2taxid_nucl_gb",
+                "compress_out_accession2taxid_nucl_wgs": "accession2taxid_nucl_wgs",
+                "compress_out_accession2taxid_pdb": "accession2taxid_pdb",
+                "compress_out_accession2taxid_prot": "accession2taxid_prot",
+                "compress_out_taxdump": "taxdump",
+            },
+        ),
+    ]
+)
+
+index_generation_stages = list(index_generation_io_map)
+
+
+def _pipeline_for_stage(stage):
+    """Return the (stages, io_map) pair the given stage belongs to, or (None, None).
+
+    Lets read_state_from_s3 drive both the short-read-mngs (idseq_dag) and the
+    index-generation multi-stage hand-offs through one code path.
+    """
+    if stage in idseq_dag_stages:
+        return idseq_dag_stages, idseq_dag_io_map
+    if stage in index_generation_stages:
+        return index_generation_stages, index_generation_io_map
+    return None, None
+
+
+def _is_index_generation(sfn_state):
+    """True when the SFN input is the multi-stage index-generation pipeline.
+
+    Detected by the per-stage WDL URI keys the start_index_generation lambda emits
+    (DOWNLOAD_WDL_URI / COMPRESS_WDL_URI / INDEX_WDL_URI), rather than the state machine
+    name, so it does not depend on the swipe SFN naming convention.
+    """
+    return "DOWNLOAD_WDL_URI" in sfn_state and "INDEX_WDL_URI" in sfn_state
+
 
 def get_input_uri_key(stage):
     return f"{xform_name(stage).upper()}_INPUT_URI"
@@ -105,7 +170,11 @@ def read_state_from_s3(sfn_state, current_state):
             error_type = type(stage_output.get("error", "StageFailed"), (Exception,), dict())
             raise error_type(stage_output.get("cause", stage_output.get("message", f"{stage} stage failed; see Batch job logs")))
 
-    if stage in idseq_dag_stages:
+    # Multi-stage pipelines (short-read-mngs idseq_dag, index-generation) namespace each
+    # workflow output as `<workflow_name>.<output>`; strip that prefix so the I/O map can
+    # resolve the next stage's `<prev>_out_<name>` inputs by bare output name.
+    stages, io_map = _pipeline_for_stage(stage)
+    if stages is not None:
         stage_output = {
             k.split(".", 1)[1]: v
             for k, v in stage_output.items()
@@ -113,13 +182,10 @@ def read_state_from_s3(sfn_state, current_state):
         }
     sfn_state["Result"].update(stage_output)
 
-    if (
-        stage in idseq_dag_stages
-        and idseq_dag_stages.index(stage) < len(idseq_dag_stages) - 1
-    ):
-        next_stage = idseq_dag_stages[idseq_dag_stages.index(stage) + 1]
+    if stages is not None and stages.index(stage) < len(stages) - 1:
+        next_stage = stages[stages.index(stage) + 1]
         next_stage_input = get_stage_input(sfn_state=sfn_state, stage=next_stage)
-        for input_name, result_key in idseq_dag_io_map[next_stage].items():  # type: ignore
+        for input_name, result_key in io_map[next_stage].items():  # type: ignore
             if input_name.startswith("fastqs"):
                 input_uri = sfn_state["Input"]["HostFilter"].get(input_name)
             else:
@@ -168,11 +234,16 @@ def preprocess_sfn_input(sfn_state, aws_region, aws_account_id, state_machine_na
         output_prefix,
         re.sub(r"v(\d+)\..+", r"\1", get_workflow_name(sfn_state)),
     )
-    stages = (
-        idseq_dag_stages
-        if re.match(r"idseq-\w+-main-\d+", state_machine_name)
-        else ["Run"]
-    )
+    if _is_index_generation(sfn_state):
+        # Multi-stage index-generation: Download -> Compress -> Index. Each stage's
+        # INPUT/OUTPUT URI keys are set below so the SFN template can read
+        # $.DOWNLOAD_INPUT_URI / $.COMPRESS_OUTPUT_URI / etc., and the cross-stage
+        # download_out_* / compress_out_* hand-off is wired by read_state_from_s3.
+        stages = index_generation_stages
+    elif re.match(r"idseq-\w+-main-\d+", state_machine_name):
+        stages = idseq_dag_stages
+    else:
+        stages = ["Run"]
     for stage in stages:
         sfn_state[get_input_uri_key(stage)] = os.path.join(
             output_path, f"{xform_name(stage)}_input.json"
@@ -190,6 +261,10 @@ def preprocess_sfn_input(sfn_state, aws_region, aws_account_id, state_machine_na
             f"{ecr_repo}/idseq-{workflow_name}:v{workflow_version}"
         )
         stage_input.setdefault("docker_image_id", default_docker_image_id)
-        stage_input.setdefault("s3_wd_uri", output_path)
+        if not _is_index_generation(sfn_state):
+            # index-gen sub-WDLs (download/compress/index) do not declare s3_wd_uri,
+            # so miniwdl would reject it at input validation. short-read-mngs and the
+            # single-stage "Run" workflows do declare String s3_wd_uri and rely on it.
+            stage_input.setdefault("s3_wd_uri", output_path)
         put_stage_input(sfn_state=sfn_state, stage=stage, stage_input=stage_input)
     return sfn_state
