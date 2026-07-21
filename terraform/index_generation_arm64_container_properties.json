@@ -1,0 +1,138 @@
+{
+  "command": [],
+  "environment": [
+    {
+      "name": "MINIWDL__DOCKER_SWARM__ALLOW_NETWORKS",
+      "value": "[]"
+    },
+    {
+      "name": "MINIWDL__DOWNLOAD_CACHE__DIR",
+      "value": "/mnt/download_cache"
+    },
+    {
+      "name": "WDL_PASSTHRU_ENVVARS",
+      "value": "DEPLOYMENT_ENVIRONMENT"
+    },
+    {
+      "name": "WDL_WORKFLOW_URI",
+      "value": "Set this variable to the S3 URI of the WDL workflow"
+    },
+    {
+      "name": "MINIWDL__S3PARCP__DOCKER_IMAGE",
+      "value": "491013321714.dkr.ecr.us-west-2.amazonaws.com/swipe:v1.4.9-seqtoid.1-arm64"
+    },
+    {
+      "name": "MINIWDL__CALL_CACHE__PUT",
+      "value": "true"
+    },
+    {
+      "name": "MINIWDL__DOWNLOAD_CACHE__DISABLE_PATTERNS",
+      "value": "[\"s3://swipe-samples-*/*\"]"
+    },
+    {
+      "name": "MINIWDL__DOWNLOAD_CACHE__PUT",
+      "value": "true"
+    },
+    {
+      "name": "APP_NAME",
+      "value": "idseq-swipe-dev"
+    },
+    {
+      "name": "AWS_DEFAULT_REGION",
+      "value": "us-west-2"
+    },
+    {
+      "name": "DEPLOYMENT_ENVIRONMENT",
+      "value": "dev"
+    },
+    {
+      "name": "SFN_EXECUTION_ID",
+      "value": "Set this variable to the current step function execution ARN"
+    },
+    {
+      "name": "MINIWDL__CALL_CACHE__GET",
+      "value": "true"
+    },
+    {
+      "name": "DOWNLOAD_CACHE_MAX_GB",
+      "value": "500"
+    },
+    {
+      "name": "WDL_INPUT_URI",
+      "value": "Set this variable to the S3 URI of the WDL input JSON"
+    },
+    {
+      "name": "MINIWDL__CALL_CACHE__BACKEND",
+      "value": "s3_progressive_upload_call_cache_backend"
+    },
+    {
+      "name": "WDL_OUTPUT_URI",
+      "value": "Set this variable to the S3 URI where the WDL output JSON will be written"
+    },
+    {
+      "name": "MINIWDL__DOWNLOAD_CACHE__GET",
+      "value": "true"
+    },
+    {
+      "name": "MINIWDL__S3PARCP__DIR",
+      "value": "/mnt"
+    },
+    {
+      "name": "MINIWDL_DIR",
+      "value": "/mnt"
+    },
+    {
+      "name": "OUTPUT_STATUS_JSON_FILES",
+      "value": "true"
+    },
+    {
+      "name": "SFN_CURRENT_STATE",
+      "value": "Set this variable to the current step function state name, like HostFilterEC2 or HostFilterSPOT"
+    },
+    {
+      "name": "MINIWDL__TASK_RUNTIME__DEFAULTS",
+      "value": "{}"
+    }
+  ],
+  "image": "491013321714.dkr.ecr.us-west-2.amazonaws.com/swipe:v1.4.9-seqtoid.1-arm64",
+  "jobRoleArn": "arn:aws:iam::491013321714:role/idseq-swipe-dev-batch-job",
+  "memory": 4,
+  "mountPoints": [
+    {
+      "containerPath": "/mnt",
+      "readOnly": false,
+      "sourceVolume": "scratch"
+    },
+    {
+      "containerPath": "/var/run/docker.sock",
+      "readOnly": false,
+      "sourceVolume": "docker_sock"
+    }
+  ],
+  "privileged": false,
+  "readonlyRootFilesystem": false,
+  "resourceRequirements": [],
+  "secrets": [],
+  "ulimits": [
+    {
+      "hardLimit": 100000,
+      "name": "nofile",
+      "softLimit": 100000
+    }
+  ],
+  "vcpus": 1,
+  "volumes": [
+    {
+      "host": {
+        "sourcePath": "/mnt"
+      },
+      "name": "scratch"
+    },
+    {
+      "host": {
+        "sourcePath": "/var/run/docker.sock"
+      },
+      "name": "docker_sock"
+    }
+  ]
+}
