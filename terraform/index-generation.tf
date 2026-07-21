@@ -41,8 +41,14 @@ locals {
       instance_types_x86      = ["c6i.2xlarge"] # 8 vCPU / 16 GB
       instance_types_graviton = ["m7g.2xlarge"] # 8 vCPU / 32 GB (Graviton3)
       max_vcpus               = 8
-      scratch_gb              = 500
-      provisioning            = "EC2"
+      # The Download stage runs update_blastdb.pl (compressed BLAST db volumes) THEN
+      # blastdbcmd -entry all -out <db>.fsa for BOTH nt/core_nt AND full nr on the same box.
+      # The first real core_nt+nr pull needed ~733 GB (compressed dbs + both uncompressed
+      # fasta dumps); the original 500 GB filled up mid-download ("Need 732963945407 bytes,
+      # only 253963251712 available"). 2 TB gives headroom for NR/core_nt growth and matches
+      # the index stages. IO-bound, so the bigger gp3 volume is cheap.
+      scratch_gb   = 2048
+      provisioning = "EC2"
     }
     compress = {
       instance_types_x86      = ["r6i.12xlarge"] # 48 vCPU / 384 GB
