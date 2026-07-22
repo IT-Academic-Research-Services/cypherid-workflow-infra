@@ -75,37 +75,67 @@ idseq_dag_stages = list(idseq_dag_io_map)
 # Compress reads the seven Download outputs; Index reads the seven Compress outputs. The
 # accession2taxid_* + taxdump small files are passed through Compress unchanged so the
 # linear chain only ever hands off to the immediately following stage.
+# Fan-out index-generation (platform-overhaul 800). Nine stages across three phases:
+#   Phase 1  DownloadTaxonomy | DownloadNT | DownloadNR                (parallel download lanes)
+#   Phase 2  CompressNT->IndexNT | CompressNR->IndexNR | IndexTaxonomy (parallel per-db lanes)
+#   Phase 3  Assemble                                                  (cross-db accession join)
+# This DAG maps each stage's cross-stage File input to the accumulated-Result output name it
+# resolves from (any prior stage's output by bare name). Result accumulates across the whole
+# run -- unioned at each parallel-branch boundary by merge_parallel_outputs -- so a lane can
+# read another lane's output: CompressNR reads the taxonomy lane's accession2taxid_pdb/prot,
+# and Assemble reads both compressed dbs. Within a lane the bare db name (nt/nr) is overwritten
+# in Result as download->compress run in sequence, so compress_out_nt resolves to the
+# compressed nt by the time the NT index/assemble stages read it.
 index_generation_io_map = collections.OrderedDict(
     [
-        ("Download", {}),
+        ("DownloadTaxonomy", {}),
+        ("DownloadNT", {}),
+        ("DownloadNR", {}),
         (
-            "Compress",
+            "CompressNR",
             {
-                "download_out_nt": "nt",
                 "download_out_nr": "nr",
-                "download_out_accession2taxid_nucl_gb": "accession2taxid_nucl_gb",
-                "download_out_accession2taxid_nucl_wgs": "accession2taxid_nucl_wgs",
                 "download_out_accession2taxid_pdb": "accession2taxid_pdb",
                 "download_out_accession2taxid_prot": "accession2taxid_prot",
-                "download_out_taxdump": "taxdump",
             },
         ),
         (
-            "Index",
+            "CompressNT",
+            {
+                "download_out_nt": "nt",
+                "download_out_accession2taxid_nucl_gb": "accession2taxid_nucl_gb",
+                "download_out_accession2taxid_nucl_wgs": "accession2taxid_nucl_wgs",
+            },
+        ),
+        ("IndexNR", {"compress_out_nr": "nr"}),
+        ("IndexNT", {"compress_out_nt": "nt"}),
+        ("IndexTaxonomy", {"taxdump": "taxdump"}),
+        (
+            "Assemble",
             {
                 "compress_out_nt": "nt",
                 "compress_out_nr": "nr",
-                "compress_out_accession2taxid_nucl_gb": "accession2taxid_nucl_gb",
-                "compress_out_accession2taxid_nucl_wgs": "accession2taxid_nucl_wgs",
-                "compress_out_accession2taxid_pdb": "accession2taxid_pdb",
-                "compress_out_accession2taxid_prot": "accession2taxid_prot",
-                "compress_out_taxdump": "taxdump",
+                "accession2taxid_nucl_gb": "accession2taxid_nucl_gb",
+                "accession2taxid_nucl_wgs": "accession2taxid_nucl_wgs",
+                "accession2taxid_pdb": "accession2taxid_pdb",
+                "accession2taxid_prot": "accession2taxid_prot",
             },
         ),
     ]
 )
 
 index_generation_stages = list(index_generation_io_map)
+
+# Within-lane sequential handoff: when the KEY stage's ReadOutput completes, the io-helper
+# writes the VALUE stage's input from the accumulated Result (the value is the next stage in
+# the SAME parallel branch, so the branch's Result is already in scope). Cross-PHASE handoffs
+# (Phase-1 downloads -> Phase-2 compress lanes, and Phase-2 lanes -> Assemble) are written by
+# merge_parallel_outputs instead, since those cross parallel-branch boundaries where each
+# branch holds an isolated copy of Result.
+index_generation_lane_successors = {
+    "CompressNR": "IndexNR",
+    "CompressNT": "IndexNT",
+}
 
 
 def _pipeline_for_stage(stage):
@@ -122,13 +152,13 @@ def _pipeline_for_stage(stage):
 
 
 def _is_index_generation(sfn_state):
-    """True when the SFN input is the multi-stage index-generation pipeline.
+    """True when the SFN input is the fan-out index-generation pipeline.
 
-    Detected by the per-stage WDL URI keys the start_index_generation lambda emits
-    (DOWNLOAD_WDL_URI / COMPRESS_WDL_URI / INDEX_WDL_URI), rather than the state machine
-    name, so it does not depend on the swipe SFN naming convention.
+    Detected by the per-lane WDL URI keys the start_index_generation lambda emits
+    (DOWNLOAD_NR_WDL_URI + ASSEMBLE_WDL_URI), rather than the state machine name, so it does
+    not depend on the swipe SFN naming convention.
     """
-    return "DOWNLOAD_WDL_URI" in sfn_state and "INDEX_WDL_URI" in sfn_state
+    return "DOWNLOAD_NR_WDL_URI" in sfn_state and "ASSEMBLE_WDL_URI" in sfn_state
 
 
 def get_input_uri_key(stage):
@@ -179,22 +209,61 @@ def read_state_from_s3(sfn_state, current_state):
         }
     sfn_state["Result"].update(stage_output)
 
-    if stages is not None and stages.index(stage) < len(stages) - 1:
+    # Determine which stage's input to write now. For the fan-out index-generation pipeline
+    # this is the WITHIN-LANE successor (or None -- cross-phase handoffs are done by
+    # merge_parallel_outputs at each parallel-branch boundary). For the linear short-read-mngs
+    # (idseq_dag) chain it is the next stage in order, as before.
+    next_stage = None
+    if stages is index_generation_stages:
+        next_stage = index_generation_lane_successors.get(stage)
+    elif stages is not None and stages.index(stage) < len(stages) - 1:
         next_stage = stages[stages.index(stage) + 1]
-        next_stage_input = get_stage_input(sfn_state=sfn_state, stage=next_stage)
-        for input_name, result_key in io_map[next_stage].items():  # type: ignore
-            if input_name.startswith("fastqs"):
-                input_uri = sfn_state["Input"]["HostFilter"].get(input_name)
-            else:
-                input_uri = sfn_state["Result"].get(result_key)
-            if input_uri:
-                next_stage_input[input_name] = input_uri
-            else:
-                logger.warning("No output found for I/O map key %s", input_name)
-        put_stage_input(
-            sfn_state=sfn_state, stage=next_stage, stage_input=next_stage_input
-        )
+
+    if next_stage:
+        _write_stage_input_from_result(sfn_state, next_stage, io_map)
     return sfn_state
+
+
+def _write_stage_input_from_result(sfn_state, next_stage, io_map):
+    """Resolve next_stage's cross-stage File inputs from the accumulated Result via io_map and
+    write its input.json. Shared by the linear (idseq_dag) handoff, the fan-out within-lane
+    handoff, and merge_parallel_outputs' cross-phase handoff.
+    """
+    next_stage_input = get_stage_input(sfn_state=sfn_state, stage=next_stage)
+    for input_name, result_key in io_map[next_stage].items():
+        if input_name.startswith("fastqs"):
+            input_uri = sfn_state["Input"]["HostFilter"].get(input_name)
+        else:
+            input_uri = sfn_state["Result"].get(result_key)
+        if input_uri:
+            next_stage_input[input_name] = input_uri
+        else:
+            logger.warning("No output found for I/O map key %s", input_name)
+    put_stage_input(sfn_state=sfn_state, stage=next_stage, stage_input=next_stage_input)
+
+
+def merge_parallel_outputs(branch_states, next_stages):
+    """Merge an SFN Parallel state's array of branch states into one state, then write the
+    given downstream stages' inputs from the merged Result (the fan-out cross-phase handoff).
+
+    SFN `Parallel` emits `[branch_0_state, branch_1_state, ...]`; each branch ran on an
+    isolated copy of the state and accumulated only its own outputs into its Result. This
+    unions those Results (and BatchJobDetails) back into a single state so the run's
+    accumulated Result is whole again, then writes each next_stage's input.json from it via the
+    index-generation io-map -- exactly what read_state_from_s3 does within a lane, but across
+    the parallel-branch boundary the per-branch ReadOutput could not see.
+    """
+    merged = dict(branch_states[0])  # carries the shared _WDL_URI / _INPUT_URI / OutputPrefix keys
+    merged_result = {}
+    merged_batch_details = {}
+    for branch in branch_states:
+        merged_result.update(branch.get("Result", {}))
+        merged_batch_details.update(branch.get("BatchJobDetails", {}))
+    merged["Result"] = merged_result
+    merged["BatchJobDetails"] = merged_batch_details
+    for stage in next_stages:
+        _write_stage_input_from_result(merged, stage, index_generation_io_map)
+    return merged
 
 
 def trim_batch_job_details(sfn_state):
@@ -248,9 +317,14 @@ def preprocess_sfn_input(sfn_state, aws_region, aws_account_id, state_machine_na
         sfn_state[get_output_uri_key(stage)] = os.path.join(
             output_path, f"{xform_name(stage)}_output.json"
         )
-        for compute_env in "SPOT", "EC2":
-            memory_key = stage + compute_env + "Memory"
-            sfn_state.setdefault(memory_key, int(os.environ[memory_key + "Default"]))
+        if not _is_index_generation(sfn_state):
+            # Fan-out index-generation supplies its four memory tiers (Download/Compress/
+            # IndexSPOT/IndexEC2 EC2Memory) directly from the start lambda, and the SFN
+            # template reads those tier keys for all nine stages -- so per-stage memory keys
+            # (which would need nine new *Default env vars) are not set here for index-gen.
+            for compute_env in "SPOT", "EC2":
+                memory_key = stage + compute_env + "Memory"
+                sfn_state.setdefault(memory_key, int(os.environ[memory_key + "Default"]))
         stage_input = sfn_state["Input"].get(stage, {})
         ecr_repo = f"{aws_account_id}.dkr.ecr.{aws_region}.amazonaws.com"
         workflow_name, workflow_version = get_workflow_name(sfn_state).rsplit("-v", 1)

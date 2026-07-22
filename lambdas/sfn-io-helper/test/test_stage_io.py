@@ -105,57 +105,66 @@ class TestIdseqDagIoMap(unittest.TestCase):
 
 
 class TestIndexGenerationIoMap(unittest.TestCase):
-    # The seven cross-stage database names handed off between index-generation stages.
-    HANDOFF_NAMES = {
-        "nt",
-        "nr",
-        "accession2taxid_nucl_gb",
-        "accession2taxid_nucl_wgs",
-        "accession2taxid_pdb",
-        "accession2taxid_prot",
-        "taxdump",
-    }
+    FANOUT_STAGES = [
+        "DownloadTaxonomy", "DownloadNT", "DownloadNR",
+        "CompressNR", "CompressNT", "IndexNR", "IndexNT", "IndexTaxonomy",
+        "Assemble",
+    ]
 
-    def test_stage_order_is_the_pipeline_order(self):
-        self.assertEqual(
-            stage_io.index_generation_stages,
-            ["Download", "Compress", "Index"],
-        )
+    def test_stage_order_is_the_fanout_pipeline(self):
+        self.assertEqual(stage_io.index_generation_stages, self.FANOUT_STAGES)
 
-    def test_stages_match_io_map_keys_and_order(self):
+    def test_stages_match_io_map_keys(self):
         self.assertEqual(
             stage_io.index_generation_stages,
             list(stage_io.index_generation_io_map),
         )
 
-    def test_download_takes_no_upstream_handoff(self):
-        # The first stage's inputs are optional NCBI URLs defaulted in the sub-WDL.
-        self.assertEqual(stage_io.index_generation_io_map["Download"], {})
+    def test_download_lanes_take_no_upstream_handoff(self):
+        for stage in ("DownloadTaxonomy", "DownloadNT", "DownloadNR"):
+            self.assertEqual(stage_io.index_generation_io_map[stage], {})
 
-    def test_compress_reads_the_seven_download_outputs(self):
-        compress = stage_io.index_generation_io_map["Compress"]
+    def test_compress_lanes_read_their_db_and_taxid_pair(self):
         self.assertEqual(
-            set(compress),
-            {f"download_out_{n}" for n in self.HANDOFF_NAMES},
+            stage_io.index_generation_io_map["CompressNR"],
+            {
+                "download_out_nr": "nr",
+                "download_out_accession2taxid_pdb": "accession2taxid_pdb",
+                "download_out_accession2taxid_prot": "accession2taxid_prot",
+            },
         )
-        # Each download_out_<X> resolves to the identically named Download output <X>.
-        for input_name, result_key in compress.items():
-            self.assertEqual(input_name, f"download_out_{result_key}")
-            self.assertIn(result_key, self.HANDOFF_NAMES)
+        self.assertEqual(
+            stage_io.index_generation_io_map["CompressNT"],
+            {
+                "download_out_nt": "nt",
+                "download_out_accession2taxid_nucl_gb": "accession2taxid_nucl_gb",
+                "download_out_accession2taxid_nucl_wgs": "accession2taxid_nucl_wgs",
+            },
+        )
 
-    def test_index_reads_the_seven_compress_outputs(self):
-        index = stage_io.index_generation_io_map["Index"]
+    def test_index_lanes_read_their_compressed_db(self):
+        self.assertEqual(stage_io.index_generation_io_map["IndexNR"], {"compress_out_nr": "nr"})
+        self.assertEqual(stage_io.index_generation_io_map["IndexNT"], {"compress_out_nt": "nt"})
         self.assertEqual(
-            set(index),
-            {f"compress_out_{n}" for n in self.HANDOFF_NAMES},
+            stage_io.index_generation_io_map["IndexTaxonomy"], {"taxdump": "taxdump"}
         )
-        for input_name, result_key in index.items():
-            self.assertEqual(input_name, f"compress_out_{result_key}")
-            self.assertIn(result_key, self.HANDOFF_NAMES)
+
+    def test_assemble_reads_both_dbs_and_all_accession2taxid(self):
+        assemble = stage_io.index_generation_io_map["Assemble"]
+        self.assertEqual(assemble["compress_out_nt"], "nt")
+        self.assertEqual(assemble["compress_out_nr"], "nr")
+        for n in ("nucl_gb", "nucl_wgs", "pdb", "prot"):
+            self.assertEqual(assemble[f"accession2taxid_{n}"], f"accession2taxid_{n}")
+
+    def test_lane_successors(self):
+        self.assertEqual(
+            stage_io.index_generation_lane_successors,
+            {"CompressNR": "IndexNR", "CompressNT": "IndexNT"},
+        )
 
     def test_pipeline_for_stage_routes_each_family(self):
         self.assertEqual(
-            stage_io._pipeline_for_stage("Compress"),
+            stage_io._pipeline_for_stage("CompressNR"),
             (stage_io.index_generation_stages, stage_io.index_generation_io_map),
         )
         self.assertEqual(
@@ -164,13 +173,12 @@ class TestIndexGenerationIoMap(unittest.TestCase):
         )
         self.assertEqual(stage_io._pipeline_for_stage("Run"), (None, None))
 
-    def test_is_index_generation_detects_wdl_uri_keys(self):
+    def test_is_index_generation_detects_fanout_keys(self):
         self.assertTrue(
             stage_io._is_index_generation(
                 {
-                    "DOWNLOAD_WDL_URI": "s3://b/index-generation-v1/download.wdl",
-                    "COMPRESS_WDL_URI": "s3://b/index-generation-v1/compress.wdl",
-                    "INDEX_WDL_URI": "s3://b/index-generation-v1/index.wdl",
+                    "DOWNLOAD_NR_WDL_URI": "s3://b/index-generation-v1/download-nr.wdl",
+                    "ASSEMBLE_WDL_URI": "s3://b/index-generation-v1/assemble.wdl",
                 }
             )
         )
@@ -182,6 +190,48 @@ class TestIndexGenerationIoMap(unittest.TestCase):
                 {"HOST_FILTER_WDL_URI": "s3://b/short-read-mngs-v1/host_filter.wdl"}
             )
         )
+
+
+class TestMergeParallelOutputs(unittest.TestCase):
+    def test_merge_unions_branch_results_and_writes_next_inputs(self):
+        # Three Phase-1 download branches, each with only its own accumulated Result.
+        branches = [
+            {"OutputPrefix": "s3://o/", "Result": {
+                "accession2taxid_pdb": "s3://o/pdb", "accession2taxid_prot": "s3://o/prot",
+                "accession2taxid_nucl_gb": "s3://o/gb", "accession2taxid_nucl_wgs": "s3://o/wgs",
+                "taxdump": "s3://o/tax"}, "BatchJobDetails": {"DownloadTaxonomy": {}}},
+            {"OutputPrefix": "s3://o/", "Result": {"nt": "s3://o/nt"},
+             "BatchJobDetails": {"DownloadNT": {}}},
+            {"OutputPrefix": "s3://o/", "Result": {"nr": "s3://o/nr"},
+             "BatchJobDetails": {"DownloadNR": {}}},
+        ]
+        written = {}
+
+        def fake_get(sfn_state, stage):
+            return {"docker_image_id": "img"}
+
+        def fake_put(sfn_state, stage, stage_input):
+            written[stage] = stage_input
+
+        with mock.patch.object(stage_io, "get_stage_input", side_effect=fake_get), \
+                mock.patch.object(stage_io, "put_stage_input", side_effect=fake_put):
+            merged = stage_io.merge_parallel_outputs(
+                branches, ["CompressNR", "CompressNT", "IndexTaxonomy"]
+            )
+
+        # Result unioned across all three branches (cross-lane visibility restored).
+        self.assertEqual(merged["Result"]["nt"], "s3://o/nt")
+        self.assertEqual(merged["Result"]["nr"], "s3://o/nr")
+        self.assertEqual(merged["Result"]["accession2taxid_prot"], "s3://o/prot")
+        self.assertEqual(
+            set(merged["BatchJobDetails"]),
+            {"DownloadTaxonomy", "DownloadNT", "DownloadNR"},
+        )
+        # Next-phase inputs resolved from the merged Result.
+        self.assertEqual(written["CompressNR"]["download_out_nr"], "s3://o/nr")
+        self.assertEqual(written["CompressNR"]["download_out_accession2taxid_pdb"], "s3://o/pdb")
+        self.assertEqual(written["CompressNT"]["download_out_nt"], "s3://o/nt")
+        self.assertEqual(written["IndexTaxonomy"]["taxdump"], "s3://o/tax")
 
 
 class TestIndexGenerationUriKeys(unittest.TestCase):
@@ -226,23 +276,23 @@ class TestPreprocessSfnInputS3WdUri(unittest.TestCase):
 
     def test_index_generation_stages_get_no_s3_wd_uri(self):
         # WDL URIs live in a seqtoid-workflows-* bucket, so get_workflow_name returns the
-        # key's dirname ("index-generation-v1"); the DOWNLOAD_/INDEX_WDL_URI keys make
-        # _is_index_generation True.
+        # key's dirname ("index-generation-v1"); the DOWNLOAD_NR_/ASSEMBLE_WDL_URI keys make
+        # _is_index_generation True. Fan-out index-gen skips per-stage memory env vars, so
+        # memory_stages is empty (no *MemoryDefault env needed).
         base = "s3://seqtoid-workflows-dev/index-generation-v1"
         sfn_state = {
             "OutputPrefix": "s3://out-bucket/runs/abc",
             "Input": {},
-            "DOWNLOAD_WDL_URI": f"{base}/download.wdl",
-            "COMPRESS_WDL_URI": f"{base}/compress.wdl",
-            "INDEX_WDL_URI": f"{base}/index.wdl",
+            "DOWNLOAD_NR_WDL_URI": f"{base}/download-nr.wdl",
+            "ASSEMBLE_WDL_URI": f"{base}/assemble.wdl",
         }
         captured = self._run(
             sfn_state,
             state_machine_name="idseq-index-generation-main-1",
-            memory_stages=stage_io.index_generation_stages,
+            memory_stages=[],
         )
 
-        self.assertEqual(set(captured), {"Download", "Compress", "Index"})
+        self.assertEqual(set(captured), set(stage_io.index_generation_stages))
         for stage, stage_input in captured.items():
             self.assertNotIn(
                 "s3_wd_uri",
