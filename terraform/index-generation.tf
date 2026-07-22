@@ -101,9 +101,14 @@ locals {
     compress = {
       instance_types_x86      = ["r6i.12xlarge"] # 48 vCPU / 384 GB
       instance_types_graviton = ["r7g.12xlarge"] # 48 vCPU / 384 GB (Graviton3)
-      max_vcpus               = 48
-      scratch_gb              = 4096
-      provisioning            = "EC2"
+      # Fan-out (800): CompressNR and CompressNT run CONCURRENTLY (Phase-2 lanes), both on
+      # this one compress compute environment. Each ncbi-compress job needs the whole 48-vCPU
+      # box, so max_vcpus must fit BOTH at once (2 x 48 = 96) -- at 48 they would serialize
+      # and silently lose the compress parallelism the fan-out exists for. Each lane still
+      # gets its own r6i.12xlarge node + its own 4 TB scratch (isolated, no shared-disk #798).
+      max_vcpus    = 96
+      scratch_gb   = 4096
+      provisioning = "EC2"
     }
     index_spot = {
       instance_types_x86      = ["r6i.4xlarge", "r6i.8xlarge", "r6i.12xlarge"]
