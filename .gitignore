@@ -176,6 +176,7 @@ cython_debug/
 
 # .python-version is committed as the Python SSOT (read by check.yml) — CZID-142
 .terraform.dev
+.terraform.dev-chaos
 .terraform.prod
 .terraform.sandbox
 .terraform.staging
