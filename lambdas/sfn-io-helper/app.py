@@ -94,18 +94,6 @@ def process_stage_output(sfn_data, context):
     return sfn_state
 
 
-@app.lambda_function("merge-parallel-outputs")
-def merge_parallel_outputs(sfn_data, context):
-    # Fan-out index-generation (platform-overhaul 800): invoked by the SFN after each Parallel
-    # phase. sfn_data["Input"] carries {"Branches": [<branch state>, ...], "NextStages":
-    # [<stage>, ...]}: the array of per-branch states the Parallel emitted, and the downstream
-    # stages whose inputs to write from the merged Result. Returns the single merged state.
-    payload = sfn_data["Input"]
-    return stage_io.merge_parallel_outputs(
-        branch_states=payload["Branches"], next_stages=payload["NextStages"]
-    )
-
-
 @app.lambda_function("handle-success")
 def handle_success(sfn_data, context):
     sfn_state = sfn_data["Input"]

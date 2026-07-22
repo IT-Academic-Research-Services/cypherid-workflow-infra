@@ -173,7 +173,6 @@ States:
         CurrentState.$: $$.State.Name
         Input:
           Branches.$: $.DownloadBranches
-          NextStages: ["CompressNR", "CompressNT", "IndexTaxonomy"]
     OutputPath: $.Payload
     Next: Phase2Lanes
 
@@ -372,7 +371,6 @@ States:
         CurrentState.$: $$.State.Name
         Input:
           Branches.$: $.LaneBranches
-          NextStages: ["Assemble"]
     OutputPath: $.Payload
     Next: Assemble
 
