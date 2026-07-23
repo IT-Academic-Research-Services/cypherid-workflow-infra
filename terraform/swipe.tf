@@ -1,5 +1,8 @@
 module "swipe" {
-  source = "github.com/chanzuckerberg/swipe?ref=v1.4.9"
+  # Vendored in-house fork (public IT-ARS mirror of thorvath-slower/swipe): pinned by
+  # immutable tag. Adds the arm64 index-generation runner + seqtoid branding on top of
+  # upstream v1.4.9; the module interface is a strict superset, so this is a drop-in.
+  source = "github.com/IT-Academic-Research-Services/swipe?ref=v1.4.9-seqtoid.1"
   tags = {
     Name = "swipe"
   }
