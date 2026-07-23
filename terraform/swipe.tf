@@ -1,5 +1,11 @@
 module "swipe" {
-  source = "github.com/chanzuckerberg/swipe?ref=v1.4.9"
+  # Vendored in-house swipe (IT-ARS public mirror), pinned to an immutable tag. This is
+  # upstream v1.4.9 + our -ucsf changes: status2.json read fix, job images to AWS ECR
+  # (not ghcr.io), sample-retention adjustments, AND the index-generation fan-out
+  # (merge_parallel_outputs) that lets the Parallel per-DB Download state merge its
+  # outputs -- required for the NT/NR fan-out SFN. The fork adds one new required input
+  # (restricted_files), supplied below.
+  source = "github.com/IT-Academic-Research-Services/swipe?ref=v1.4.9-ucsf.4"
   tags = {
     Name = "swipe"
   }
@@ -7,6 +13,15 @@ module "swipe" {
   app_name        = "idseq-swipe-${var.DEPLOYMENT_ENVIRONMENT}"
   job_policy_arns = [aws_iam_policy.idseq_batch_main_job.arn, "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"]
   call_cache      = true
+
+  # Data-minimization (vendored fork -ucsf.2): the fork wires a lambda that deletes
+  # restricted intermediate files (host/human-filtered reads, validated source fastqs)
+  # at the end of every Step Function run. We ADOPT the capability but ship it DORMANT:
+  # an empty list matches nothing, so nothing is deleted. Flip the per-env feature flag
+  # var.enable_swipe_restricted_file_deletion to activate it with the canonical
+  # UCSF/CZI patterns in local.swipe_restricted_files. Off by default so this migration
+  # changes no runtime behavior; enabling deletion becomes a deliberate one-line change.
+  restricted_files = var.enable_swipe_restricted_file_deletion ? local.swipe_restricted_files : []
 
   # mocking parameters
   ami_ssm_parameter = var.DEPLOYMENT_ENVIRONMENT == "test" ? "/mock-aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id" : "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id"
@@ -260,4 +275,39 @@ resource "aws_vpc_security_group_egress_rule" "aegea-ecs-allow_dns_tcp_ipv4" {
   ip_protocol       = "tcp"
   from_port         = 53
   to_port           = 53
+}
+
+# --- Restricted intermediate-file deletion (data minimization) -----------------------
+# The vendored swipe fork can delete restricted intermediate files at the end of each
+# Step Function run. We keep the capability deployed but OFF by default; flip this per
+# environment to turn it on. See module.swipe.restricted_files above.
+variable "enable_swipe_restricted_file_deletion" {
+  description = "When true, swipe deletes restricted intermediate files (host/human-filtered reads, source fastqs) at the end of each Step Function run, using local.swipe_restricted_files. Default false: the capability is deployed but dormant (deletes nothing) until deliberately enabled per environment."
+  type        = bool
+  default     = false
+}
+
+locals {
+  # Canonical UCSF/CZI restricted-file patterns (fullmatch regexes), kept verbatim from
+  # the vendored fork's default. Applied ONLY when the flag above is true. Commented
+  # entries are the ones UCSF/CZI deliberately RETAIN (dedup / human-filtered fastq kept
+  # for reprocessing). Captured here so enabling the feature needs no re-derivation.
+  swipe_restricted_files = [
+    ".*bowtie2_ercc_filtered\\d+\\.fastq$",
+    ".*bowtie2_host\\.bam$",
+    ".*bowtie2_host_filtered\\d+\\.fastq$",
+    ".*bowtie2_human_filtered\\d+\\.fastq$",
+    # ".*dedup\\d+\\.fastq$",
+    ".*fastp\\d+\\.fastq$",
+    ".*hisat2_host_filtered\\d+\\.fastq$",
+    # ".*hisat2_human_filtered\\d+\\.fastq$",
+    ".*sample_quality_filtered\\.fastq$",
+    ".*sample_validated\\.fastq$",
+    ".*sample\\.hostfiltered\\.bam$",
+    ".*sample\\.hostfiltered\\.fastq$",
+    ".*sample\\.humanfiltered\\.bam$",
+    # ".*sample\\.humanfiltered\\.fastq$",
+    ".*valid_input\\d+\\.fastq$",
+    ".*validated_\\d+\\.fastq\\.gz$",
+  ]
 }
