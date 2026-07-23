@@ -112,7 +112,12 @@ jobs:
           targs=()
           for t in "${_targets[@]}"; do targs+=("-target=$t"); done
           echo "terraform plan ${targs[*]}"
-          terraform plan -input=false "${targs[@]}" -out=tf.plan | tee plan.txt
+          # -lock=false: the plan job assumes the READ-ONLY czid-<env>-gh-actions-plan role,
+          # which has no s3:PutObject, so it cannot write the backend state lockfile
+          # (use_lockfile = true). A read-only plan never mutates state, so skipping the lock
+          # is safe -- it still reads + refreshes current state. The gated apply job (write role)
+          # keeps the default lock.
+          terraform plan -input=false -lock=false "${targs[@]}" -out=tf.plan | tee plan.txt
           {
             echo "### Scoped plan for \`$TARGETS\`"
             echo '```'
