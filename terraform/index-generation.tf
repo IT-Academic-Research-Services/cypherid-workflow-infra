@@ -37,6 +37,54 @@ locals {
   #   compress   r6i.12xlarge (48/384)          -> r7g.12xlarge (48/384)
   #   index      r6i.{4,8,12}xlarge (16..48 / 128..384) -> r7g.{4,8,12}xlarge (same)
   index_generation_stages_base = {
+    # DOWNLOAD SPLIT (platform-overhaul 799). The old single `download` stage ran
+    # update_blastdb.pl + blastdbcmd -out <db>.fsa for core_nt AND full nr AND the taxonomy
+    # files on ONE 8-vCPU box sharing ONE scratch volume. That serialized nt behind nr (nr ran
+    # ~7.4h, nt then pended "insufficient resources on 1 node") and, worse, nr's nr.fsa filled
+    # the shared volume so core_nt failed with "Need 269326843136 bytes, only 144753012736
+    # available" (run index-generation-core-nt-s3-192600). Splitting into three per-DATABASE
+    # stages -- each its own compute environment + queue (the for_each below) and its OWN
+    # right-sized scratch volume -- lets nt, nr and taxonomy download CONCURRENTLY on separate
+    # boxes with isolated disks. Download wall-clock collapses from (taxonomy + nr + nt) to
+    # max(taxonomy, nr, nt). Per-DB failure is also isolated: with call_cache=true (swipe.tf)
+    # a re-run skips the succeeded DB stages and re-runs only the failed one.
+    #
+    # These SUPERSEDE the single `download` stage. `download` is retained (below) until the
+    # SFN template + start_index_generation lambda routing switch lands (799 step 2, see
+    # deploy/../DESIGN or the ticket); at that point `download` is removed. Additive for now so
+    # nothing that still references the `download` queue breaks.
+    #
+    # Same 8-vCPU box as the proven single-stage download; only scratch differs, sized to each
+    # DB's working set (compressed volumes + uncompressed .fsa) with headroom. gp3 is cheap and
+    # the stage is IO-bound. Right-size cores after a profiling run if nr extraction is the long
+    # pole (matches this file's "confirm against one profiling run" ethos).
+    download_taxonomy = {
+      instance_types_x86      = ["c6i.2xlarge"] # 8 vCPU / 16 GB
+      instance_types_graviton = ["m7g.2xlarge"] # 8 vCPU / 32 GB (Graviton3)
+      max_vcpus               = 8
+      # accession2taxid (nucl_gb/nucl_wgs/pdb/prot.FULL ~23.6GB compressed) + taxdump; the
+      # decompressed working set is the long pole here (prot.FULL). 512 GB is ample.
+      scratch_gb   = 512
+      provisioning = "EC2"
+    }
+    download_nt = {
+      instance_types_x86      = ["c6i.2xlarge"]
+      instance_types_graviton = ["m7g.2xlarge"]
+      max_vcpus               = 8
+      # core_nt: compressed BLAST volumes (~269 GB) + core_nt.fsa. 1.5 TB isolated volume.
+      scratch_gb   = 1536
+      provisioning = "EC2"
+    }
+    download_nr = {
+      instance_types_x86      = ["c6i.2xlarge"]
+      instance_types_graviton = ["m7g.2xlarge"]
+      max_vcpus               = 8
+      # nr is the largest: compressed volumes + full nr.fsa. 2 TB isolated volume (was the DB
+      # that exhausted the shared 500 GB / left only 134.8 GiB for core_nt).
+      scratch_gb   = 2048
+      provisioning = "EC2"
+    }
+    # RETAINED until the routing switch (799 step 2) moves the SFN off it, then delete.
     download = {
       instance_types_x86      = ["c6i.2xlarge"] # 8 vCPU / 16 GB
       instance_types_graviton = ["m7g.2xlarge"] # 8 vCPU / 32 GB (Graviton3)
@@ -53,9 +101,14 @@ locals {
     compress = {
       instance_types_x86      = ["r6i.12xlarge"] # 48 vCPU / 384 GB
       instance_types_graviton = ["r7g.12xlarge"] # 48 vCPU / 384 GB (Graviton3)
-      max_vcpus               = 48
-      scratch_gb              = 4096
-      provisioning            = "EC2"
+      # Fan-out (800): CompressNR and CompressNT run CONCURRENTLY (Phase-2 lanes), both on
+      # this one compress compute environment. Each ncbi-compress job needs the whole 48-vCPU
+      # box, so max_vcpus must fit BOTH at once (2 x 48 = 96) -- at 48 they would serialize
+      # and silently lose the compress parallelism the fan-out exists for. Each lane still
+      # gets its own r6i.12xlarge node + its own 4 TB scratch (isolated, no shared-disk #798).
+      max_vcpus    = 96
+      scratch_gb   = 4096
+      provisioning = "EC2"
     }
     index_spot = {
       instance_types_x86      = ["r6i.4xlarge", "r6i.8xlarge", "r6i.12xlarge"]

@@ -63,6 +63,13 @@ module "swipe" {
       # to the on-demand queue on a spot reclaim (see sfn_templates/index-generation.yml).
       extra_template_vars = {
         "index_generation_download_job_queue_arn" : aws_batch_job_queue.index_generation["download"].arn,
+        # Download split (799): per-database queues so nt/nr/taxonomy run concurrently on
+        # separate right-sized boxes. Wired here so the SFN template's Parallel Download
+        # branches can route to them (routing switch is 799 step 2). Additive: the single
+        # `download` arn above stays until that switch removes it.
+        "index_generation_download_taxonomy_job_queue_arn" : aws_batch_job_queue.index_generation["download_taxonomy"].arn,
+        "index_generation_download_nt_job_queue_arn" : aws_batch_job_queue.index_generation["download_nt"].arn,
+        "index_generation_download_nr_job_queue_arn" : aws_batch_job_queue.index_generation["download_nr"].arn,
         "index_generation_compress_job_queue_arn" : aws_batch_job_queue.index_generation["compress"].arn,
         "index_generation_index_spot_job_queue_arn" : aws_batch_job_queue.index_generation["index_spot"].arn,
         "index_generation_index_on_demand_job_queue_arn" : aws_batch_job_queue.index_generation["index_ondemand"].arn,
