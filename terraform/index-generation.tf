@@ -458,7 +458,10 @@ resource "aws_lambda_function" "start_index_generation" {
     variables = {
       DEPLOYMENT_ENVIRONMENT            = var.DEPLOYMENT_ENVIRONMENT
       INDEX_GENERATION_SFN_ARN          = module.swipe.sfn_arns["index-generation"]
-      INDEX_GENERATION_WORKFLOW_VERSION = "v2.4.4" # Why is this hardcoded, and the most recent seems to be v2.4.8
+      # Fan-out index-generation version (semver SSOT, platform-overhaul #843). Must match the
+      # published WDL prefix s3://<workflows>/index-generation-<VER>/ and the ECR tag
+      # index-generation:<VER>. Bump all three together when releasing a new index-gen version.
+      INDEX_GENERATION_WORKFLOW_VERSION = "v2.5.0"
       AWS_ACCOUNT_ID                    = var.AWS_ACCOUNT_ID
       # Per-stage container memory (MB) for the multi-stage pipeline (Lever 1, Track A).
       # Replaces the single MEMORY/VCPU override of the old monolith. VCPU is now set by
