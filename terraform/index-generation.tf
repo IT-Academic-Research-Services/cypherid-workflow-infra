@@ -456,8 +456,8 @@ resource "aws_lambda_function" "start_index_generation" {
 
   environment {
     variables = {
-      DEPLOYMENT_ENVIRONMENT            = var.DEPLOYMENT_ENVIRONMENT
-      INDEX_GENERATION_SFN_ARN          = module.swipe.sfn_arns["index-generation"]
+      DEPLOYMENT_ENVIRONMENT   = var.DEPLOYMENT_ENVIRONMENT
+      INDEX_GENERATION_SFN_ARN = module.swipe.sfn_arns["index-generation"]
       # Fan-out index-generation version (semver SSOT, platform-overhaul #843). Must match the
       # published WDL prefix s3://<workflows>/index-generation-<VER>/ and the ECR tag
       # index-generation:<VER>. Bump all three together when releasing a new index-gen version.
