@@ -52,7 +52,10 @@ locals {
 
   # DATA-1 (CZID-31): allow terraform to destroy data resources only in throwaway envs;
   # protect the shared/long-lived envs (staging/prod) from a silent destroy/replace data loss.
-  data_force_destroy = contains(["dev", "sandbox"], var.DEPLOYMENT_ENVIRONMENT)
+  # dev-chaos is the most throwaway of all -- the Chaos Engine sandbox is meant to be stood up
+  # and torn down between campaigns -- so it is force-destroyable so terraform destroy leaves no
+  # orphaned (billed) buckets behind.
+  data_force_destroy = contains(["dev", "sandbox", "dev-chaos"], var.DEPLOYMENT_ENVIRONMENT)
 }
 
 # TODO: Create one bucket per environment? Or one bucket per version?
