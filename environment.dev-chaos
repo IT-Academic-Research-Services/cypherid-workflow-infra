@@ -1,0 +1,20 @@
+# Resolve the location of this file and set APP_HOME to the root
+if [[ -n "$ZSH_VERSION" ]]; then
+    export APP_HOME=${0:A:h}
+else
+    SOURCE="${BASH_SOURCE[0]}"
+    while [ -h "$SOURCE" ] ; do SOURCE="$(readlink "$SOURCE")"; done
+    export APP_HOME="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+fi
+
+# dev-chaos: the disposable Chaos Engine pipeline sandbox (platform-overhaul roadmap
+# item for the pipeline-chaos sandbox). It is a full, independently-named copy of the
+# dev pipeline -- idseq-dev-chaos-* SFN / Batch / Lambda / buckets -- standing in the
+# SAME dev AWS account (seqtoid-dev, 491013321714) but on its OWN terraform state key
+# (idseqdev-chaos, distinct from dev's idseqdev). The env name has no value validation
+# in the terraform, so this is a variable flip, not a clone: every resource is scoped by
+# ${var.DEPLOYMENT_ENVIRONMENT}, so a dev-chaos apply can NEVER touch a shared idseq-dev-*
+# resource. Chaos experiments fault only this copy; terraform destroy removes it.
+export DEPLOYMENT_ENVIRONMENT=dev-chaos
+export EXPECT_AWS_ACCOUNT_ALIAS=seqtoid-dev
+source "${APP_HOME}/environment"

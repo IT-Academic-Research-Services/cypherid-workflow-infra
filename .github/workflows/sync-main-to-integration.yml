@@ -1,0 +1,117 @@
+name: Sync main -> integration
+
+# Keeps `integration` from silently rotting behind `main`.
+#
+# promote-integration-to-main rolls integration -> main, but NOTHING ever brought main back down to
+# integration. So every commit that reached main WITHOUT going through integration -- a hotfix via
+# workflow_dispatch (an explicitly supported path, #289/#290), or infra/CI work merged direct -- left
+# integration permanently behind, and the gap only ever grew. It was found 18 commits behind with zero
+# commits of its own. Consequences, all quiet:
+#   - a feature branched off main and PR'd into integration carries the whole backlog in its diff, and
+#     the preview sandbox then BUILDS that -- so the author is not reviewing their change in isolation;
+#   - a feature branched off integration is developed and tested against stale code;
+#   - roll-up conflicts accumulate the longer the drift persists.
+# Every roll-up merge commit also lands on main and not integration, so the drift restarts immediately
+# even in the happy path. Tracked in the platform-overhaul back-sync ticket (Forgejo 691).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: sync-main-to-integration
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    # Do not run on forks of this repo. Gated on a repo VARIABLE rather than a hardcoded
+    # `github.repository == 'org/repo'` string: that pattern is what makes the trunk workflows
+    # silently no-op in the UCSF org (#692). Set TRUNK_SYNC_ENABLED=true on the canonical repo only.
+    if: ${{ vars.TRUNK_SYNC_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate app token
+        id: app_token
+        if: ${{ vars.CI_APP_ENABLED == 'true' }}
+        uses: chanzuckerberg/github-app-token@365b1f2db827eb8f17288ec335b1a7e3c03ff683 # v1.1.4
+        with:
+          app_id: ${{ secrets.GH_ACTIONS_HELPER_APP_ID }}
+          private_key: ${{ secrets.GH_ACTIONS_HELPER_PK }}
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app_token.outputs.token || secrets.GITOPS_TOKEN || github.token }}
+          persist-credentials: true
+
+      - name: Sync integration up to main
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITOPS_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name  "seqtoid-gitops"
+          git config user.email "gitops@seqtoid.local"
+          git fetch origin main integration
+
+          if git merge-base --is-ancestor origin/main origin/integration; then
+            echo "integration already contains main -- nothing to do."
+            exit 0
+          fi
+
+          # NO-OP GUARD: main can be AHEAD of integration by commits that change no files -- most
+          # commonly the merge commit that promote-integration-to-main lands on main during the
+          # nightly promote round-trip. The trees are then identical, so there is nothing to sync;
+          # without this the fast-forward push gets rejected by branch protection and the fallback
+          # opens a PR with a 0-file diff that sits open until someone closes it. If the working
+          # trees match, stop here as a clean no-op rather than open (or leave) an empty PR.
+          if git diff --quiet origin/main origin/integration; then
+            echo "main and integration have identical trees -- nothing to sync (no-op)."
+            exit 0
+          fi
+
+          # Lossless fast-forward: integration has NO commits of its own, so it can simply advance.
+          if git merge-base --is-ancestor origin/integration origin/main; then
+            echo "integration is strictly behind main -- fast-forwarding."
+            if git push origin "origin/main:integration"; then
+              echo "integration fast-forwarded to $(git rev-parse --short origin/main)."
+              exit 0
+            fi
+            echo "::warning::fast-forward push was rejected (branch protection). Opening a PR instead."
+          else
+            # DIVERGED: integration carries feature commits not yet rolled up, AND main carries commits
+            # integration lacks. A fast-forward would DROP the feature commits, so it must not be used.
+            echo "integration has diverged from main -- opening a merge PR instead of forcing."
+          fi
+
+          # Fallback that never loses work: propose the sync as a reviewable PR.
+          BRANCH="gitops/sync-integration-$(git rev-parse --short origin/main)"
+          git checkout -B "$BRANCH" origin/integration
+          if ! git merge --no-edit origin/main; then
+            git merge --abort || true
+            echo "::error::main -> integration does not merge cleanly. A human must reconcile it."
+            gh issue create \
+              --title "integration has drifted from main and no longer merges cleanly" \
+              --body "The automated main -> integration sync could not merge. \`integration\` must be reconciled by hand before the next roll-up, or the drift will keep growing. Tracked in the platform-overhaul back-sync ticket (Forgejo 691)." \
+              || true
+            exit 1
+          fi
+          # Belt-and-suspenders: never open an EMPTY PR. If the merged (local) branch has no file
+          # diff against integration -- e.g. it only pulled in no-op merge commits -- there is
+          # nothing to review, so stop before pushing the branch or opening a PR. The early
+          # tree-identity guard above catches the common case; this covers the diverged path too.
+          if git diff --quiet origin/integration "$BRANCH"; then
+            echo "synced branch has no file changes vs integration -- skipping PR (no-op)."
+            exit 0
+          fi
+
+          git push -u origin "$BRANCH"
+          gh pr create --base integration --head "$BRANCH" \
+            --title "sync: bring integration up to main" \
+            --body "Automated back-sync. \`integration\` was behind \`main\`; without this it keeps drifting and every feature PR into integration carries the backlog in its diff. Tracked in the platform-overhaul back-sync ticket (Forgejo 691)." \
+            || echo "a sync PR may already be open"

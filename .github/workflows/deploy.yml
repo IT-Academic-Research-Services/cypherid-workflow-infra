@@ -103,7 +103,7 @@ jobs:
           # batch/states/lambda/ecr/s3. Replaces the shared idseq-support gha-seqtoid role. The
           # apply role is trusted only from refs/heads/main, which is the workflow_dispatch
           # default ref. CZID-40 (CICD-6) / CZID-81.
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-apply
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment == 'dev-chaos' && 'dev' || inputs.environment }}-gh-actions-apply
           role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
           # aws-profile is load-bearing, not tidiness. `environment` derives the region with
@@ -221,7 +221,7 @@ jobs:
         with:
           # Same per-env least-privilege apply role and profile as the legacy job.
           # See the DeployTerraform job for why aws-profile is load-bearing.
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-apply
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment == 'dev-chaos' && 'dev' || inputs.environment }}-gh-actions-apply
           role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
           aws-profile: idseq-${{ inputs.environment }}

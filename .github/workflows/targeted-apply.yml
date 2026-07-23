@@ -112,7 +112,12 @@ jobs:
           targs=()
           for t in "${_targets[@]}"; do targs+=("-target=$t"); done
           echo "terraform plan ${targs[*]}"
-          terraform plan -input=false "${targs[@]}" -out=tf.plan | tee plan.txt
+          # -lock=false: the plan job assumes the READ-ONLY czid-<env>-gh-actions-plan role,
+          # which has no s3:PutObject, so it cannot write the backend state lockfile
+          # (use_lockfile = true). A read-only plan never mutates state, so skipping the lock
+          # is safe -- it still reads + refreshes current state. The gated apply job (write role)
+          # keeps the default lock.
+          terraform plan -input=false -lock=false "${targs[@]}" -out=tf.plan | tee plan.txt
           {
             echo "### Scoped plan for \`$TARGETS\`"
             echo '```'
@@ -193,5 +198,16 @@ jobs:
             echo "::error::No tf.plan found from the plan job."
             exit 1
           fi
+          # Regenerate archive_file outputs that live INSIDE fetched modules (e.g. the swipe
+          # sfn-io-helper deployment.zip). `make package-lambdas` above only builds the
+          # root-repo lambda zips; a module's archive_file zip is written by terraform at plan
+          # time and does NOT travel in tf.plan across the plan->apply job boundary, so the
+          # saved plan would fail with "reading ZIP file ... deployment.zip: no such file".
+          # A throwaway scoped re-plan re-evaluates those archive_file data sources and writes
+          # the zips to disk byte-identically (same source => same output_sha), so the saved
+          # plan still applies (and is still rejected if real state drifted).
+          read -ra _t <<< "$TARGETS"; ta=(); for t in "${_t[@]}"; do ta+=("-target=$t"); done
+          terraform plan -input=false -lock=false "${ta[@]}" -out=regen.tfplan >/dev/null 2>&1 || true
+          rm -f regen.tfplan
           echo "Applying the reviewed scoped plan. Terraform refuses it if state drifted since planning."
           terraform apply -input=false tf.plan
