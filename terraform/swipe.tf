@@ -1,8 +1,10 @@
 module "swipe" {
-  # Vendored in-house fork (public IT-ARS mirror of thorvath-slower/swipe): pinned by
-  # immutable tag. Adds the arm64 index-generation runner + seqtoid branding on top of
-  # upstream v1.4.9; the module interface is a strict superset, so this is a drop-in.
-  source = "github.com/IT-Academic-Research-Services/swipe?ref=v1.4.9-seqtoid.1"
+  # Vendored in-house swipe (IT-ARS public mirror), pinned to an immutable tag. This is
+  # upstream v1.4.9 + our -ucsf fixes: the status2.json read fix, deploying job images to
+  # AWS ECR instead of ghcr.io, and sample-retention adjustments. The module variable
+  # interface is a strict superset of v1.4.9, so the caller below is unchanged (drop-in).
+  # NOTE: the index-generation fan-out (merge_parallel_outputs) lands in a later tag.
+  source = "github.com/IT-Academic-Research-Services/swipe?ref=v1.4.9-ucsf.3"
   tags = {
     Name = "swipe"
   }
