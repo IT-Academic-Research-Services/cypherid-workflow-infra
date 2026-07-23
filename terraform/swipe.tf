@@ -1,10 +1,11 @@
 module "swipe" {
   # Vendored in-house swipe (IT-ARS public mirror), pinned to an immutable tag. This is
-  # upstream v1.4.9 + our -ucsf fixes: the status2.json read fix, deploying job images to
-  # AWS ECR instead of ghcr.io, and sample-retention adjustments. Interface is nearly
-  # v1.4.9-compatible; the fork adds ONE new required input (restricted_files), supplied
-  # below. NOTE: the index-generation fan-out (merge_parallel_outputs) lands in a later tag.
-  source = "github.com/IT-Academic-Research-Services/swipe?ref=v1.4.9-ucsf.3"
+  # upstream v1.4.9 + our -ucsf changes: status2.json read fix, job images to AWS ECR
+  # (not ghcr.io), sample-retention adjustments, AND the index-generation fan-out
+  # (merge_parallel_outputs) that lets the Parallel per-DB Download state merge its
+  # outputs -- required for the NT/NR fan-out SFN. The fork adds one new required input
+  # (restricted_files), supplied below.
+  source = "github.com/IT-Academic-Research-Services/swipe?ref=v1.4.9-ucsf.4"
   tags = {
     Name = "swipe"
   }
