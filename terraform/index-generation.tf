@@ -414,6 +414,17 @@ resource "aws_iam_role_policy" "start_index_generation_lambda" {
         Resource : "arn:aws:s3:::seqtoid-public-references", # TODO: aws_s3_bucket.cypherid-public-references[0].arn
       },
       {
+        # The fan-out lambda writes stage_io_map.json into the run's output prefix (and may
+        # read prior-run artifacts for seeding). Scoped to the ncbi-indexes-<env> prefix so the
+        # lambda cannot touch the rest of the references bucket (~4.8 TB of research data).
+        Effect : "Allow",
+        Action : [
+          "s3:GetObject",
+          "s3:PutObject",
+        ],
+        Resource : "arn:aws:s3:::seqtoid-public-references/ncbi-indexes-${var.DEPLOYMENT_ENVIRONMENT}/*",
+      },
+      {
         Effect : "Allow",
         Action : [
           "logs:CreateLogGroup",
