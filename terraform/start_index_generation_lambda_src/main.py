@@ -98,10 +98,32 @@ def start_index_generation(event, *args):
     #                                 resume; e.g. the recovered 530GB nr.fsa).
     #   nt_database_type           -- "nt" (default) or "core_nt".
     #   skip_protein_compression / skip_nuc_compression -- pass through to the compress lanes.
+    #   refresh_scope              -- Lever 4 (802): "full" (default) / "nt_only" / "nr_only" /
+    #                                 "lineage_only". A scoped refresh reuses the prior run's
+    #                                 compressed artifact for each out-of-scope DB (skip download
+    #                                 + skip compression) instead of rebuilding it, so it does not
+    #                                 pay the two biggest poles for a DB that did not change.
+    #   taxonomy_snapshot_prefix   -- Lever 4 (802): pin the taxonomy lane to an S3 snapshot
+    #                                 (778/747) instead of live NCBI FTP, which only serves the
+    #                                 CURRENT taxonomy -- required for a reproducible rebuild.
     overrides = event.get("index_generation", {}) if isinstance(event, dict) else {}
     provided_nr = overrides.get("provided_nr")
     provided_nt = overrides.get("provided_nt")
     nt_database_type = overrides.get("nt_database_type", "nt")
+
+    # Lever 4 (802) refresh_scope: which lanes do real work this run.
+    refresh_scope = overrides.get("refresh_scope", "full")
+    valid_scopes = ("full", "nt_only", "nr_only", "lineage_only")
+    if refresh_scope not in valid_scopes:
+        raise ValueError(
+            f"refresh_scope must be one of {valid_scopes}, got {refresh_scope!r}"
+        )
+    nt_in_scope = refresh_scope in ("full", "nt_only")
+    nr_in_scope = refresh_scope in ("full", "nr_only")
+
+    # Lever 4 (802) taxonomy snapshot pin: an S3 key prefix (or full s3:// URI) holding a
+    # held taxonomy snapshot. When unset the taxonomy lane defaults to live NCBI FTP.
+    taxonomy_snapshot_prefix = overrides.get("taxonomy_snapshot_prefix")
 
     sfn = boto3.client("stepfunctions")
     s3 = boto3.client("s3")
@@ -146,8 +168,30 @@ def start_index_generation(event, *args):
     stage_io_map_key = f"ncbi-indexes-{deployment_environment}/{index_name}/stage_io_map.json"
     s3.put_object(Bucket=bucket, Key=stage_io_map_key, Body=json.dumps(STAGES_IO_MAP).encode())
 
+    def snapshot_uri(name):
+        """Resolve a taxonomy snapshot file: `taxonomy_snapshot_prefix` may be a full s3://
+        URI or a key prefix under the references bucket."""
+        prefix = taxonomy_snapshot_prefix.rstrip("/")
+        if prefix.startswith("s3://"):
+            return f"{prefix}/{name}"
+        return s3_uri(f"{prefix}/{name}")
+
     # Per-stage inputs: ONLY each sub-WDL's declared workflow inputs. The File hand-offs are
     # injected at runtime via STAGES_IO_MAP, so they are omitted here.
+    download_taxonomy_input = {"docker_image_id": docker_image_id}
+    if taxonomy_snapshot_prefix:
+        # Lever 4 (802) taxonomy snapshot pin (778/747): NCBI FTP only serves the CURRENT
+        # taxonomy, so a reproducible rebuild must read a held snapshot from S3. The
+        # download-taxonomy sub-WDL already accepts each source as an overridable URI; point the
+        # five at the pinned snapshot (same .gz filenames the WDL's gz-detection expects).
+        download_taxonomy_input.update({
+            "provided_accession2taxid_nucl_gb": snapshot_uri("nucl_gb.accession2taxid.gz"),
+            "provided_accession2taxid_nucl_wgs": snapshot_uri("nucl_wgs.accession2taxid.gz"),
+            "provided_accession2taxid_pdb": snapshot_uri("pdb.accession2taxid.gz"),
+            "provided_accession2taxid_prot": snapshot_uri("prot.accession2taxid.FULL.gz"),
+            "provided_taxdump": snapshot_uri("taxdump.tar.gz"),
+        })
+
     download_nt_input = {"docker_image_id": docker_image_id, "nt_database_type": nt_database_type}
     if provided_nt:
         download_nt_input["provided_nt"] = provided_nt
@@ -159,12 +203,29 @@ def start_index_generation(event, *args):
     compress_nt_input = {"docker_image_id": docker_image_id}
     if previous_nt_compressed:
         compress_nt_input["previous_nt_compressed"] = s3_uri(previous_nt_compressed)
-    if "skip_nuc_compression" in overrides:
-        compress_nt_input["skip_nuc_compression"] = overrides["skip_nuc_compression"]
 
     compress_nr_input = {"docker_image_id": docker_image_id}
     if previous_nr_compressed:
         compress_nr_input["previous_nr_compressed"] = s3_uri(previous_nr_compressed)
+
+    # Lever 4 (802) refresh_scope: an out-of-scope DB lane reuses the prior run's compressed
+    # fasta and skips (re)compression, so a scoped refresh pays neither the download nor the
+    # compress pole for a DB that is not being refreshed. The index step still rebuilds from the
+    # reused fasta, so the artifact set stays complete. Eliminating that index rebuild too (and
+    # reusing the prior index directory) is the deploy-gated SFN Choice-gate follow-on
+    # (DESIGN-index-gen-lever4-cadence.md). If no prior compressed artifact exists, the lane
+    # falls back to a full build (correct, just not skipped). An explicit provided_*/skip
+    # override always wins over the scope default.
+    if not nt_in_scope and not provided_nt and previous_nt_compressed:
+        download_nt_input["provided_nt"] = s3_uri(previous_nt_compressed)
+        compress_nt_input["skip_nuc_compression"] = True
+    if not nr_in_scope and not provided_nr and previous_nr_compressed:
+        download_nr_input["provided_nr"] = s3_uri(previous_nr_compressed)
+        compress_nr_input["skip_protein_compression"] = True
+
+    # Explicit compression-skip overrides take precedence over the refresh_scope default.
+    if "skip_nuc_compression" in overrides:
+        compress_nt_input["skip_nuc_compression"] = overrides["skip_nuc_compression"]
     if "skip_protein_compression" in overrides:
         compress_nr_input["skip_protein_compression"] = overrides["skip_protein_compression"]
 
@@ -173,7 +234,7 @@ def start_index_generation(event, *args):
         index_taxonomy_input["previous_lineages"] = s3_uri(previous_lineages)
 
     stage_inputs = {
-        "DownloadTaxonomy": {"docker_image_id": docker_image_id},
+        "DownloadTaxonomy": download_taxonomy_input,
         "DownloadNT": download_nt_input,
         "DownloadNR": download_nr_input,
         "CompressNT": compress_nt_input,
