@@ -1,33 +1,29 @@
-# SWIPE multi-stage index-generation pipeline entry point (Lever 1, Track A).
+# SWIPE fan-out index-generation pipeline entry point (platform-overhaul 800, Lever 2).
 #
-# Historically this was a SINGLE `RunEC2` state doing one batch:submitJob.sync to one
-# monolithic compute environment, where miniwdl ran every WDL task locally on one giant
-# r5n.24xlarge + 64 TB RAID0 scratch. Track A splits the run into right-sized phase stages,
-# each its own Batch job on its own compute environment/queue, mirroring short-read-mngs.yml:
+# Three PHASES with per-database lanes fanned out inside phases 1 and 2, replacing the linear
+# Download -> Compress -> Index chain:
 #
-#   Download  -- IO-bound; small on-demand box (no spot fallback needed, already on-demand).
-#   Compress  -- the long single ncbi-compress task; r6i on-demand. A spot reclaim on this
-#                multi-hour, un-checkpointed task would restart the whole rebuild, so this
-#                stage never runs on spot (this is exactly why the on-demand CE fix landed).
-#   Index     -- minimap2/diamond index build; interruption-tolerant, so this is where spot
-#                belongs. It runs on a spot queue with an on-demand fallback (the same
-#                SPOT -> DetectError -> EC2 pattern short-read-mngs uses for every stage).
+#   Phase 1  Parallel[ DownloadTaxonomy | DownloadNT | DownloadNR ]  -> MergeDownloads
+#   Phase 2  Parallel[ CompressNR->IndexNR | CompressNT->IndexNT | IndexTaxonomy ] -> MergeLanes
+#   Phase 3  Assemble   (GenerateIndexAccessions -- the one cross-DB task)
 #
-# The multi-TB compressed fasta is handed between stages via S3 the way short-read-mngs
-# hands off between HostFilter/NonHostAlignment/etc.: each stage reads <STAGE>_INPUT_URI and
-# writes <STAGE>_OUTPUT_URI (wired by the swipe preprocess_input / process_stage_output
-# lambdas). Handoff cost/time of that multi-TB object across stage boundaries is a tracked
-# open risk (see the Part-3 fan-out design, open-risk #1).
+# core_nt, nr and the taxonomy files download concurrently on their own right-sized boxes (the
+# 799 per-DB download queues + isolated scratch), then each DB's compress+index lane runs
+# concurrently, so NR's long compress overlaps NT's whole path. Wall-clock -> max(lane).
 #
-# UPSTREAM DEPENDENCY: a SWIPE stage runs a WHOLE WDL locally, so each stage needs its own
-# sub-WDL (download / compress / index) with S3 in/out. Those sub-WDLs are authored in
-# seqtoid-workflows (the WDL split PR), and the per-stage image is built + uploaded to the
-# workflows bucket there. Until that lands this state machine is authored-and-correct but
-# cannot execute end-to-end. True per-chunk (~50-way) fan-out of the Index stage is a
-# separate later refinement (the WDL scatter PR) layered on top of this Index stage.
-Comment: SWIPE multi-stage index-generation pipeline entry point
+# Each stage runs a whole per-stage sub-WDL (seqtoid-workflows index-generation/*.wdl) and
+# hands off via S3: it reads $.<STAGE>_INPUT_URI and writes $.<STAGE>_OUTPUT_URI (wired by the
+# swipe preprocess_input / process_stage_output lambdas). Cross-lane + cross-phase File
+# handoffs are threaded by the io-helper: within a lane by process_stage_output (lane
+# successors), across a Parallel boundary by merge_parallel_outputs (unions the branch Results
+# then writes the next phase's inputs).
+#
+# SPOT: this v1 runs the index lanes + Assemble on the on-demand index queue for a tractable,
+# correct first cut. Re-introducing the SPOT -> DetectError -> EC2 fallback per index lane (as
+# the pre-fan-out Index stage had) is a follow-on cost optimization.
+Comment: SWIPE fan-out index-generation pipeline entry point
 StartAt: PreprocessInput
-TimeoutSeconds: 1209600 # 14 DAYS (total execution run time, including Batch job scheduling delays)
+TimeoutSeconds: 1209600 # 14 DAYS (total execution run time, including Batch scheduling delays)
 States:
   PreprocessInput:
     Type: Task
@@ -39,150 +35,347 @@ States:
         CurrentState.$: $$.State.Name
         Input.$: $
     OutputPath: $.Payload
-    Next: Download
+    Next: Phase1Download
 
-  # ---- Download stage: IO-bound, small on-demand box ----------------------------------
-  Download:
-    Type: Task
-    Resource: arn:aws:states:::batch:submitJob.sync
-    Parameters:
-      JobQueue: "${index_generation_download_job_queue_arn}"
-      JobName.$: $$.Execution.Name
-      JobDefinition: &JobDefinition "${batch_job_definition_name}"
-      Timeout:
-        AttemptDurationSeconds: 43200 # 12 hours
-      ContainerOverrides:
-        Memory.$: $.DownloadEC2Memory
-        Environment: &DownloadEnvironment
-          - Name: WDL_INPUT_URI
-            Value.$: $.DOWNLOAD_INPUT_URI
-          - Name: WDL_WORKFLOW_URI
-            Value.$: $.DOWNLOAD_WDL_URI
-          - Name: WDL_OUTPUT_URI
-            Value.$: $.DOWNLOAD_OUTPUT_URI
-          - Name: SFN_EXECUTION_ID
-            Value.$: $$.Execution.Id
-          - Name: SFN_CURRENT_STATE
-            Value.$: $$.State.Name
-    ResultPath: $.BatchJobDetails.Download
-    Next: DownloadReadOutput
-    Retry: &BatchRetryConfig
-      - ErrorEquals: ["Batch.AWSBatchException"]
-        IntervalSeconds: 15
-        MaxAttempts: 3
-        BackoffRate: 2.1 # 2.0 triggers the linter because when converted to json it becomes an int, not a float
+  # ---- Phase 1: three concurrent download lanes (799 per-DB queues + isolated scratch) ----
+  Phase1Download:
+    Type: Parallel
+    ResultPath: $.DownloadBranches
+    Next: MergeDownloads
     Catch:
       - ErrorEquals: ["States.ALL"]
-        ResultPath: $.BatchJobError.Download
-        Next: DownloadReadOutput
-  DownloadReadOutput:
+        ResultPath: $.BatchJobError.Phase1Download
+        Next: HandleFailure
+    Branches:
+      - StartAt: DownloadTaxonomy
+        States:
+          DownloadTaxonomy:
+            Type: Task
+            Resource: arn:aws:states:::batch:submitJob.sync
+            Parameters:
+              JobQueue: "${index_generation_download_taxonomy_job_queue_arn}"
+              JobName.$: $$.Execution.Name
+              JobDefinition: &JobDefinition "${batch_job_definition_name}"
+              Timeout: &DownloadBatchTimeout
+                AttemptDurationSeconds: 43200 # 12 hours
+              ContainerOverrides:
+                Memory.$: $.DownloadEC2Memory
+                Environment:
+                  - Name: WDL_INPUT_URI
+                    Value.$: $.DOWNLOAD_TAXONOMY_INPUT_URI
+                  - Name: WDL_WORKFLOW_URI
+                    Value.$: $.DOWNLOAD_TAXONOMY_WDL_URI
+                  - Name: WDL_OUTPUT_URI
+                    Value.$: $.DOWNLOAD_TAXONOMY_OUTPUT_URI
+                  - &SfnExecEnv
+                    Name: SFN_EXECUTION_ID
+                    Value.$: $$.Execution.Id
+                  - Name: SFN_CURRENT_STATE
+                    Value.$: $$.State.Name
+            ResultPath: $.BatchJobDetails.DownloadTaxonomy
+            Next: DownloadTaxonomyReadOutput
+            Retry: &BatchRetryConfig
+              - ErrorEquals: ["Batch.AWSBatchException"]
+                IntervalSeconds: 15
+                MaxAttempts: 3
+                BackoffRate: 2.1
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                ResultPath: $.BatchJobError.DownloadTaxonomy
+                Next: DownloadTaxonomyReadOutput
+          DownloadTaxonomyReadOutput:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters: &ReadOutputParameters
+              FunctionName: "${process_stage_output_lambda_name}"
+              Payload: *PassthroughStatePayload
+            OutputPath: $.Payload
+            End: true
+      - StartAt: DownloadNT
+        States:
+          DownloadNT:
+            Type: Task
+            Resource: arn:aws:states:::batch:submitJob.sync
+            Parameters:
+              JobQueue: "${index_generation_download_nt_job_queue_arn}"
+              JobName.$: $$.Execution.Name
+              JobDefinition: *JobDefinition
+              Timeout: *DownloadBatchTimeout
+              ContainerOverrides:
+                Memory.$: $.DownloadEC2Memory
+                Environment:
+                  - Name: WDL_INPUT_URI
+                    Value.$: $.DOWNLOAD_NT_INPUT_URI
+                  - Name: WDL_WORKFLOW_URI
+                    Value.$: $.DOWNLOAD_NT_WDL_URI
+                  - Name: WDL_OUTPUT_URI
+                    Value.$: $.DOWNLOAD_NT_OUTPUT_URI
+                  - *SfnExecEnv
+                  - Name: SFN_CURRENT_STATE
+                    Value.$: $$.State.Name
+            ResultPath: $.BatchJobDetails.DownloadNT
+            Next: DownloadNTReadOutput
+            Retry: *BatchRetryConfig
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                ResultPath: $.BatchJobError.DownloadNT
+                Next: DownloadNTReadOutput
+          DownloadNTReadOutput:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters: *ReadOutputParameters
+            OutputPath: $.Payload
+            End: true
+      - StartAt: DownloadNR
+        States:
+          DownloadNR:
+            Type: Task
+            Resource: arn:aws:states:::batch:submitJob.sync
+            Parameters:
+              JobQueue: "${index_generation_download_nr_job_queue_arn}"
+              JobName.$: $$.Execution.Name
+              JobDefinition: *JobDefinition
+              Timeout: *DownloadBatchTimeout
+              ContainerOverrides:
+                Memory.$: $.DownloadEC2Memory
+                Environment:
+                  - Name: WDL_INPUT_URI
+                    Value.$: $.DOWNLOAD_NR_INPUT_URI
+                  - Name: WDL_WORKFLOW_URI
+                    Value.$: $.DOWNLOAD_NR_WDL_URI
+                  - Name: WDL_OUTPUT_URI
+                    Value.$: $.DOWNLOAD_NR_OUTPUT_URI
+                  - *SfnExecEnv
+                  - Name: SFN_CURRENT_STATE
+                    Value.$: $$.State.Name
+            ResultPath: $.BatchJobDetails.DownloadNR
+            Next: DownloadNRReadOutput
+            Retry: *BatchRetryConfig
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                ResultPath: $.BatchJobError.DownloadNR
+                Next: DownloadNRReadOutput
+          DownloadNRReadOutput:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters: *ReadOutputParameters
+            OutputPath: $.Payload
+            End: true
+
+  # Union the three branch Results back into one state + write the Phase-2 lane inputs.
+  MergeDownloads:
     Type: Task
     Resource: arn:aws:states:::lambda:invoke
-    Parameters: &ReadOutputParameters
-      FunctionName: "${process_stage_output_lambda_name}"
-      Payload: *PassthroughStatePayload
-    OutputPath: $.Payload
-    Next: DownloadSucceeded
-    Catch:
-      - ErrorEquals: ["States.ALL"]
-        Next: DownloadFailed
-  DownloadFailed:
-    Type: Pass
-    Next: HandleFailure
-  DownloadSucceeded:
-    Type: Pass
-    Next: Compress
-
-  # ---- Compress stage: long single ncbi-compress task, r6i ON-DEMAND (never spot) ------
-  Compress:
-    Type: Task
-    Resource: arn:aws:states:::batch:submitJob.sync
     Parameters:
-      JobQueue: "${index_generation_compress_job_queue_arn}"
-      JobName.$: $$.Execution.Name
-      JobDefinition: *JobDefinition
-      Timeout:
-        AttemptDurationSeconds: 172800 # 48 hours (multi-hour compression of the full NT/NR db)
-      ContainerOverrides:
-        Memory.$: $.CompressEC2Memory
-        Environment: &CompressEnvironment
-          - Name: WDL_INPUT_URI
-            Value.$: $.COMPRESS_INPUT_URI
-          - Name: WDL_WORKFLOW_URI
-            Value.$: $.COMPRESS_WDL_URI
-          - Name: WDL_OUTPUT_URI
-            Value.$: $.COMPRESS_OUTPUT_URI
-          - Name: SFN_EXECUTION_ID
-            Value.$: $$.Execution.Id
-          - Name: SFN_CURRENT_STATE
-            Value.$: $$.State.Name
-    ResultPath: $.BatchJobDetails.Compress
-    Next: CompressReadOutput
-    Retry: *BatchRetryConfig
+      FunctionName: "${merge_parallel_outputs_lambda_name}"
+      Payload:
+        ExecutionId.$: $$.Execution.Id
+        CurrentState.$: $$.State.Name
+        Input:
+          Branches.$: $.DownloadBranches
+    OutputPath: $.Payload
+    Next: Phase2Lanes
+
+  # ---- Phase 2: three concurrent per-database lanes (compress->index; taxonomy index) ----
+  Phase2Lanes:
+    Type: Parallel
+    ResultPath: $.LaneBranches
+    Next: MergeLanes
     Catch:
       - ErrorEquals: ["States.ALL"]
-        ResultPath: $.BatchJobError.Compress
-        Next: CompressReadOutput
-  CompressReadOutput:
+        ResultPath: $.BatchJobError.Phase2Lanes
+        Next: HandleFailure
+    Branches:
+      - StartAt: CompressNR
+        States:
+          CompressNR:
+            Type: Task
+            Resource: arn:aws:states:::batch:submitJob.sync
+            Parameters:
+              JobQueue: "${index_generation_compress_job_queue_arn}"
+              JobName.$: $$.Execution.Name
+              JobDefinition: *JobDefinition
+              Timeout: &CompressBatchTimeout
+                AttemptDurationSeconds: 86400 # 24 hours
+              ContainerOverrides:
+                Memory.$: $.CompressEC2Memory
+                Environment:
+                  - Name: WDL_INPUT_URI
+                    Value.$: $.COMPRESS_NR_INPUT_URI
+                  - Name: WDL_WORKFLOW_URI
+                    Value.$: $.COMPRESS_NR_WDL_URI
+                  - Name: WDL_OUTPUT_URI
+                    Value.$: $.COMPRESS_NR_OUTPUT_URI
+                  - *SfnExecEnv
+                  - Name: SFN_CURRENT_STATE
+                    Value.$: $$.State.Name
+            ResultPath: $.BatchJobDetails.CompressNR
+            Next: CompressNRReadOutput
+            Retry: *BatchRetryConfig
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                ResultPath: $.BatchJobError.CompressNR
+                Next: CompressNRReadOutput
+          CompressNRReadOutput:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters: *ReadOutputParameters
+            OutputPath: $.Payload
+            Next: IndexNR
+          IndexNR:
+            Type: Task
+            Resource: arn:aws:states:::batch:submitJob.sync
+            Parameters:
+              JobQueue: "${index_generation_index_on_demand_job_queue_arn}"
+              JobName.$: $$.Execution.Name
+              JobDefinition: *JobDefinition
+              Timeout: &IndexBatchTimeout
+                AttemptDurationSeconds: 86400 # 24 hours
+              ContainerOverrides:
+                Memory.$: $.IndexEC2Memory
+                Environment:
+                  - Name: WDL_INPUT_URI
+                    Value.$: $.INDEX_NR_INPUT_URI
+                  - Name: WDL_WORKFLOW_URI
+                    Value.$: $.INDEX_NR_WDL_URI
+                  - Name: WDL_OUTPUT_URI
+                    Value.$: $.INDEX_NR_OUTPUT_URI
+                  - *SfnExecEnv
+                  - Name: SFN_CURRENT_STATE
+                    Value.$: $$.State.Name
+            ResultPath: $.BatchJobDetails.IndexNR
+            Next: IndexNRReadOutput
+            Retry: *BatchRetryConfig
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                ResultPath: $.BatchJobError.IndexNR
+                Next: IndexNRReadOutput
+          IndexNRReadOutput:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters: *ReadOutputParameters
+            OutputPath: $.Payload
+            End: true
+      - StartAt: CompressNT
+        States:
+          CompressNT:
+            Type: Task
+            Resource: arn:aws:states:::batch:submitJob.sync
+            Parameters:
+              JobQueue: "${index_generation_compress_job_queue_arn}"
+              JobName.$: $$.Execution.Name
+              JobDefinition: *JobDefinition
+              Timeout: *CompressBatchTimeout
+              ContainerOverrides:
+                Memory.$: $.CompressEC2Memory
+                Environment:
+                  - Name: WDL_INPUT_URI
+                    Value.$: $.COMPRESS_NT_INPUT_URI
+                  - Name: WDL_WORKFLOW_URI
+                    Value.$: $.COMPRESS_NT_WDL_URI
+                  - Name: WDL_OUTPUT_URI
+                    Value.$: $.COMPRESS_NT_OUTPUT_URI
+                  - *SfnExecEnv
+                  - Name: SFN_CURRENT_STATE
+                    Value.$: $$.State.Name
+            ResultPath: $.BatchJobDetails.CompressNT
+            Next: CompressNTReadOutput
+            Retry: *BatchRetryConfig
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                ResultPath: $.BatchJobError.CompressNT
+                Next: CompressNTReadOutput
+          CompressNTReadOutput:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters: *ReadOutputParameters
+            OutputPath: $.Payload
+            Next: IndexNT
+          IndexNT:
+            Type: Task
+            Resource: arn:aws:states:::batch:submitJob.sync
+            Parameters:
+              JobQueue: "${index_generation_index_on_demand_job_queue_arn}"
+              JobName.$: $$.Execution.Name
+              JobDefinition: *JobDefinition
+              Timeout: *IndexBatchTimeout
+              ContainerOverrides:
+                Memory.$: $.IndexEC2Memory
+                Environment:
+                  - Name: WDL_INPUT_URI
+                    Value.$: $.INDEX_NT_INPUT_URI
+                  - Name: WDL_WORKFLOW_URI
+                    Value.$: $.INDEX_NT_WDL_URI
+                  - Name: WDL_OUTPUT_URI
+                    Value.$: $.INDEX_NT_OUTPUT_URI
+                  - *SfnExecEnv
+                  - Name: SFN_CURRENT_STATE
+                    Value.$: $$.State.Name
+            ResultPath: $.BatchJobDetails.IndexNT
+            Next: IndexNTReadOutput
+            Retry: *BatchRetryConfig
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                ResultPath: $.BatchJobError.IndexNT
+                Next: IndexNTReadOutput
+          IndexNTReadOutput:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters: *ReadOutputParameters
+            OutputPath: $.Payload
+            End: true
+      - StartAt: IndexTaxonomy
+        States:
+          IndexTaxonomy:
+            Type: Task
+            Resource: arn:aws:states:::batch:submitJob.sync
+            Parameters:
+              JobQueue: "${index_generation_index_on_demand_job_queue_arn}"
+              JobName.$: $$.Execution.Name
+              JobDefinition: *JobDefinition
+              Timeout: *IndexBatchTimeout
+              ContainerOverrides:
+                Memory.$: $.IndexEC2Memory
+                Environment:
+                  - Name: WDL_INPUT_URI
+                    Value.$: $.INDEX_TAXONOMY_INPUT_URI
+                  - Name: WDL_WORKFLOW_URI
+                    Value.$: $.INDEX_TAXONOMY_WDL_URI
+                  - Name: WDL_OUTPUT_URI
+                    Value.$: $.INDEX_TAXONOMY_OUTPUT_URI
+                  - *SfnExecEnv
+                  - Name: SFN_CURRENT_STATE
+                    Value.$: $$.State.Name
+            ResultPath: $.BatchJobDetails.IndexTaxonomy
+            Next: IndexTaxonomyReadOutput
+            Retry: *BatchRetryConfig
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                ResultPath: $.BatchJobError.IndexTaxonomy
+                Next: IndexTaxonomyReadOutput
+          IndexTaxonomyReadOutput:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters: *ReadOutputParameters
+            OutputPath: $.Payload
+            End: true
+
+  # Union the three lane Results + write the Assemble input.
+  MergeLanes:
     Type: Task
     Resource: arn:aws:states:::lambda:invoke
-    Parameters: *ReadOutputParameters
+    Parameters:
+      FunctionName: "${merge_parallel_outputs_lambda_name}"
+      Payload:
+        ExecutionId.$: $$.Execution.Id
+        CurrentState.$: $$.State.Name
+        Input:
+          Branches.$: $.LaneBranches
     OutputPath: $.Payload
-    Next: CompressSucceeded
-    Catch:
-      - ErrorEquals: ["States.ALL"]
-        Next: CompressFailed
-  CompressFailed:
-    Type: Pass
-    Next: HandleFailure
-  CompressSucceeded:
-    Type: Pass
-    Next: IndexSPOT
+    Next: Assemble
 
-  # ---- Index stage: interruption-tolerant, SPOT with on-demand fallback ----------------
-  IndexSPOT:
-    Type: Task
-    Resource: arn:aws:states:::batch:submitJob.sync
-    Parameters:
-      JobQueue: "${index_generation_index_spot_job_queue_arn}"
-      JobName.$: $$.Execution.Name
-      JobDefinition: *JobDefinition
-      Timeout: &IndexBatchTimeout
-        AttemptDurationSeconds: 86400 # 24 hours
-      ContainerOverrides:
-        Memory.$: $.IndexSPOTMemory
-        Environment: &IndexEnvironment
-          - Name: WDL_INPUT_URI
-            Value.$: $.INDEX_INPUT_URI
-          - Name: WDL_WORKFLOW_URI
-            Value.$: $.INDEX_WDL_URI
-          - Name: WDL_OUTPUT_URI
-            Value.$: $.INDEX_OUTPUT_URI
-          - Name: SFN_EXECUTION_ID
-            Value.$: $$.Execution.Id
-          - Name: SFN_CURRENT_STATE
-            Value.$: $$.State.Name
-    ResultPath: $.BatchJobDetails.Index
-    Next: IndexReadOutput
-    Retry: *BatchRetryConfig
-    Catch:
-      - ErrorEquals: ["States.ALL"]
-        ResultPath: $.BatchJobError.IndexSPOT
-        Next: IndexGetCause
-  IndexGetCause:
-    Type: Pass
-    Parameters:
-      "Cause.$": "States.StringToJson($.BatchJobError.IndexSPOT.Cause)"
-    ResultPath: "$.BatchJobError.IndexSPOT"
-    Next: IndexDetectError
-  IndexDetectError:
-    Type: Choice
-    Choices:
-      - Variable: "$.BatchJobError.IndexSPOT.Cause.StatusReason"
-        StringMatches: "Host EC2 (instance i-*) terminated."
-        Next: IndexEC2
-    Default: IndexReadOutput
-  IndexEC2:
+  # ---- Phase 3: cross-database accession index + final assembly ----
+  Assemble:
     Type: Task
     Resource: arn:aws:states:::batch:submitJob.sync
     Parameters:
@@ -192,27 +385,36 @@ States:
       Timeout: *IndexBatchTimeout
       ContainerOverrides:
         Memory.$: $.IndexEC2Memory
-        Environment: *IndexEnvironment
-    ResultPath: $.BatchJobDetails.Index
-    Next: IndexReadOutput
+        Environment:
+          - Name: WDL_INPUT_URI
+            Value.$: $.ASSEMBLE_INPUT_URI
+          - Name: WDL_WORKFLOW_URI
+            Value.$: $.ASSEMBLE_WDL_URI
+          - Name: WDL_OUTPUT_URI
+            Value.$: $.ASSEMBLE_OUTPUT_URI
+          - *SfnExecEnv
+          - Name: SFN_CURRENT_STATE
+            Value.$: $$.State.Name
+    ResultPath: $.BatchJobDetails.Assemble
+    Next: AssembleReadOutput
     Retry: *BatchRetryConfig
     Catch:
       - ErrorEquals: ["States.ALL"]
-        ResultPath: $.BatchJobError.IndexEC2
-        Next: IndexReadOutput
-  IndexReadOutput:
+        ResultPath: $.BatchJobError.Assemble
+        Next: AssembleReadOutput
+  AssembleReadOutput:
     Type: Task
     Resource: arn:aws:states:::lambda:invoke
     Parameters: *ReadOutputParameters
     OutputPath: $.Payload
-    Next: IndexSucceeded
+    Next: AssembleSucceeded
     Catch:
       - ErrorEquals: ["States.ALL"]
-        Next: IndexFailed
-  IndexFailed:
+        Next: AssembleFailed
+  AssembleFailed:
     Type: Pass
     Next: HandleFailure
-  IndexSucceeded:
+  AssembleSucceeded:
     Type: Pass
     Next: HandleSuccess
 
@@ -225,8 +427,8 @@ States:
     OutputPath: $.Payload
     End: true
   HandleFailure:
-    # The HandleFailure state is expected to read error details, do any housekeeping necessary, then raise an exception
-    # with the error details (so they can be seen directly in the Step Functions API).
+    # Reads error details, does housekeeping, then raises an exception with the error details
+    # (so they can be seen directly in the Step Functions API).
     Type: Task
     Resource: arn:aws:states:::lambda:invoke
     Parameters:

@@ -46,7 +46,11 @@ else
     TF_VAR_owner="${OWNER}"
     TF_VAR_environment="${DEPLOYMENT_ENVIRONMENT}"
 
-    if [[ $DEPLOYMENT_ENVIRONMENT == dev || $DEPLOYMENT_ENVIRONMENT == sandbox ]]; then
+    # dev-chaos (the disposable Chaos Engine pipeline sandbox) lives in the dev account and
+    # keeps its state in the same -test tfstate bucket as dev/sandbox, but under its own key
+    # (idseqdev-chaos), so it is fully isolated from dev state while never reaching for the
+    # prod-style tfstate-<acct> bucket that does not exist in the dev account.
+    if [[ $DEPLOYMENT_ENVIRONMENT == dev || $DEPLOYMENT_ENVIRONMENT == sandbox || $DEPLOYMENT_ENVIRONMENT == dev-chaos ]]; then
         TF_S3_BUCKET=tfstate-$AWS_ACCOUNT_ID-test
     else
         TF_S3_BUCKET=tfstate-$AWS_ACCOUNT_ID

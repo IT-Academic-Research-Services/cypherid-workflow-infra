@@ -37,19 +37,78 @@ locals {
   #   compress   r6i.12xlarge (48/384)          -> r7g.12xlarge (48/384)
   #   index      r6i.{4,8,12}xlarge (16..48 / 128..384) -> r7g.{4,8,12}xlarge (same)
   index_generation_stages_base = {
+    # DOWNLOAD SPLIT (platform-overhaul 799). The old single `download` stage ran
+    # update_blastdb.pl + blastdbcmd -out <db>.fsa for core_nt AND full nr AND the taxonomy
+    # files on ONE 8-vCPU box sharing ONE scratch volume. That serialized nt behind nr (nr ran
+    # ~7.4h, nt then pended "insufficient resources on 1 node") and, worse, nr's nr.fsa filled
+    # the shared volume so core_nt failed with "Need 269326843136 bytes, only 144753012736
+    # available" (run index-generation-core-nt-s3-192600). Splitting into three per-DATABASE
+    # stages -- each its own compute environment + queue (the for_each below) and its OWN
+    # right-sized scratch volume -- lets nt, nr and taxonomy download CONCURRENTLY on separate
+    # boxes with isolated disks. Download wall-clock collapses from (taxonomy + nr + nt) to
+    # max(taxonomy, nr, nt). Per-DB failure is also isolated: with call_cache=true (swipe.tf)
+    # a re-run skips the succeeded DB stages and re-runs only the failed one.
+    #
+    # These SUPERSEDE the single `download` stage. `download` is retained (below) until the
+    # SFN template + start_index_generation lambda routing switch lands (799 step 2, see
+    # deploy/../DESIGN or the ticket); at that point `download` is removed. Additive for now so
+    # nothing that still references the `download` queue breaks.
+    #
+    # Same 8-vCPU box as the proven single-stage download; only scratch differs, sized to each
+    # DB's working set (compressed volumes + uncompressed .fsa) with headroom. gp3 is cheap and
+    # the stage is IO-bound. Right-size cores after a profiling run if nr extraction is the long
+    # pole (matches this file's "confirm against one profiling run" ethos).
+    download_taxonomy = {
+      instance_types_x86      = ["c6i.2xlarge"] # 8 vCPU / 16 GB
+      instance_types_graviton = ["m7g.2xlarge"] # 8 vCPU / 32 GB (Graviton3)
+      max_vcpus               = 8
+      # accession2taxid (nucl_gb/nucl_wgs/pdb/prot.FULL ~23.6GB compressed) + taxdump; the
+      # decompressed working set is the long pole here (prot.FULL). 512 GB is ample.
+      scratch_gb   = 512
+      provisioning = "EC2"
+    }
+    download_nt = {
+      instance_types_x86      = ["c6i.2xlarge"]
+      instance_types_graviton = ["m7g.2xlarge"]
+      max_vcpus               = 8
+      # core_nt: compressed BLAST volumes (~269 GB) + core_nt.fsa. 1.5 TB isolated volume.
+      scratch_gb   = 1536
+      provisioning = "EC2"
+    }
+    download_nr = {
+      instance_types_x86      = ["c6i.2xlarge"]
+      instance_types_graviton = ["m7g.2xlarge"]
+      max_vcpus               = 8
+      # nr is the largest: compressed volumes + full nr.fsa. 2 TB isolated volume (was the DB
+      # that exhausted the shared 500 GB / left only 134.8 GiB for core_nt).
+      scratch_gb   = 2048
+      provisioning = "EC2"
+    }
+    # RETAINED until the routing switch (799 step 2) moves the SFN off it, then delete.
     download = {
       instance_types_x86      = ["c6i.2xlarge"] # 8 vCPU / 16 GB
       instance_types_graviton = ["m7g.2xlarge"] # 8 vCPU / 32 GB (Graviton3)
       max_vcpus               = 8
-      scratch_gb              = 500
-      provisioning            = "EC2"
+      # The Download stage runs update_blastdb.pl (compressed BLAST db volumes) THEN
+      # blastdbcmd -entry all -out <db>.fsa for BOTH nt/core_nt AND full nr on the same box.
+      # The first real core_nt+nr pull needed ~733 GB (compressed dbs + both uncompressed
+      # fasta dumps); the original 500 GB filled up mid-download ("Need 732963945407 bytes,
+      # only 253963251712 available"). 2 TB gives headroom for NR/core_nt growth and matches
+      # the index stages. IO-bound, so the bigger gp3 volume is cheap.
+      scratch_gb   = 2048
+      provisioning = "EC2"
     }
     compress = {
       instance_types_x86      = ["r6i.12xlarge"] # 48 vCPU / 384 GB
       instance_types_graviton = ["r7g.12xlarge"] # 48 vCPU / 384 GB (Graviton3)
-      max_vcpus               = 48
-      scratch_gb              = 4096
-      provisioning            = "EC2"
+      # Fan-out (800): CompressNR and CompressNT run CONCURRENTLY (Phase-2 lanes), both on
+      # this one compress compute environment. Each ncbi-compress job needs the whole 48-vCPU
+      # box, so max_vcpus must fit BOTH at once (2 x 48 = 96) -- at 48 they would serialize
+      # and silently lose the compress parallelism the fan-out exists for. Each lane still
+      # gets its own r6i.12xlarge node + its own 4 TB scratch (isolated, no shared-disk #798).
+      max_vcpus    = 96
+      scratch_gb   = 4096
+      provisioning = "EC2"
     }
     index_spot = {
       instance_types_x86      = ["r6i.4xlarge", "r6i.8xlarge", "r6i.12xlarge"]
@@ -95,19 +154,20 @@ variable "lambda_log_retention_in_days" {
 # because it is a static architecture toggle, co-located with its only consumer -- the same
 # pattern as lambda_log_retention_in_days above.
 #
-# Default false so x86 stays the applied state: this is the fallback. HELD/GATED -- flip to
-# true (a one-line change, the whole point of the toggle) ONLY after BOTH gates pass:
-#   1. the multi-arch/arm64 index-generation image is published to ECR (an arm64 host cannot
-#      pull an x86-only image), and
-#   2. an arm64 IDSEQ_BENCH rebuild holds AUPR >= 0.98 (arch changes are adopted only after
-#      the AUPR gate, per NTNR-OPTIMIZATION-PLAN-2026-07-20.md Lever 2).
-# If arm64 AUPR regresses, flip back to false to revert to Track A's x86 per-stage families.
-# When true, index-generation.tf's ECS-optimized AMI lookup also switches to the arm64 image
-# so the AMI arch matches the instance arch.
+# Default TRUE: Graviton3 (arm64) is now the applied/default architecture for the
+# index-generation stages. It was previously held at false and enabled only via a manual
+# TF_VAR_use_graviton=true at apply time, which meant any apply that forgot the override
+# silently reverted the live CEs to x86 -- so the toggle is persisted here instead of relying
+# on an ambient env var. Both original gates are satisfied: the multi-arch/arm64
+# index-generation SWIPE image is published to ECR (swipe:v1.4.9-seqtoid.1-arm64), and the
+# arm64 pipeline was validated end-to-end on m7g/r7g (per-stage provisioning + ncbi-compress +
+# diamond) before this flip. When true the ECS-optimized AMI lookup also switches to the arm64
+# image so the AMI arch matches the instance arch. To revert to Track A's x86 per-stage
+# families (e.g. if an arm64 AUPR regression is found), flip this one line back to false.
 variable "use_graviton" {
   type        = bool
-  default     = false
-  description = "Run index-generation Batch stages on Graviton3 (arm64). Default false (x86 fallback); enable only after the arm64 image publish + arm64 AUPR>=0.98 gates pass."
+  default     = true
+  description = "Run index-generation Batch stages on Graviton3 (arm64). Default true; flip to false to fall back to Track A x86 per-stage families."
 }
 
 data "aws_ssm_parameter" "idseq_batch_ami" {
@@ -201,6 +261,12 @@ resource "aws_launch_template" "index_generation" {
 
   name      = "${local.service_name}-${each.key}-batch-${local.launch_template_user_data_hash}"
   user_data = filebase64(local.launch_template_user_data_file)
+
+  # Make each new launch-template version the DEFAULT so the Batch compute environment (which
+  # references this template by name, i.e. its default version) actually picks up changes -- e.g.
+  # the download scratch bump. Without this, a config change creates a new version but the CE keeps
+  # launching instances from the stale default (the 500 GB -> 2 TB download fix would not take).
+  update_default_version = true
 
   # NOTE[JH]: This setting makes IMDSv2 required. Any software that needs to talk to the metadata service
   # needs to do so using the v2 endpoint.
@@ -348,6 +414,17 @@ resource "aws_iam_role_policy" "start_index_generation_lambda" {
         Resource : "arn:aws:s3:::seqtoid-public-references", # TODO: aws_s3_bucket.cypherid-public-references[0].arn
       },
       {
+        # The fan-out lambda writes stage_io_map.json into the run's output prefix (and may
+        # read prior-run artifacts for seeding). Scoped to the ncbi-indexes-<env> prefix so the
+        # lambda cannot touch the rest of the references bucket (~4.8 TB of research data).
+        Effect : "Allow",
+        Action : [
+          "s3:GetObject",
+          "s3:PutObject",
+        ],
+        Resource : "arn:aws:s3:::seqtoid-public-references/ncbi-indexes-${var.DEPLOYMENT_ENVIRONMENT}/*",
+      },
+      {
         Effect : "Allow",
         Action : [
           "logs:CreateLogGroup",
@@ -390,9 +467,12 @@ resource "aws_lambda_function" "start_index_generation" {
 
   environment {
     variables = {
-      DEPLOYMENT_ENVIRONMENT            = var.DEPLOYMENT_ENVIRONMENT
-      INDEX_GENERATION_SFN_ARN          = module.swipe.sfn_arns["index-generation"]
-      INDEX_GENERATION_WORKFLOW_VERSION = "v2.4.4" # Why is this hardcoded, and the most recent seems to be v2.4.8
+      DEPLOYMENT_ENVIRONMENT   = var.DEPLOYMENT_ENVIRONMENT
+      INDEX_GENERATION_SFN_ARN = module.swipe.sfn_arns["index-generation"]
+      # Fan-out index-generation version (semver SSOT, platform-overhaul #843). Must match the
+      # published WDL prefix s3://<workflows>/index-generation-<VER>/ and the ECR tag
+      # index-generation:<VER>. Bump all three together when releasing a new index-gen version.
+      INDEX_GENERATION_WORKFLOW_VERSION = "v2.5.0"
       AWS_ACCOUNT_ID                    = var.AWS_ACCOUNT_ID
       # Per-stage container memory (MB) for the multi-stage pipeline (Lever 1, Track A).
       # Replaces the single MEMORY/VCPU override of the old monolith. VCPU is now set by
