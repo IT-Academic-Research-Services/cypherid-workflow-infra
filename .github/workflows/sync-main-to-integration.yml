@@ -110,8 +110,78 @@ jobs:
             exit 0
           fi
 
-          git push -u origin "$BRANCH"
+          # The branch name is derived from the main SHA, so a RERUN at the same SHA targets a branch
+          # that may already exist remotely from an earlier attempt. A plain push is then rejected
+          # non-fast-forward ("tip of your current branch is behind its remote counterpart"), set -e
+          # kills the job, and the sync silently never lands -- which is exactly how seven of these
+          # PRs stacked up. The branch is a disposable bot branch regenerated from
+          # (integration + main) every run and nobody develops on it, so overwriting it is correct;
+          # --force-with-lease keeps that honest by refusing if the remote moved unexpectedly.
+          if ! git push --force-with-lease -u origin "$BRANCH"; then
+            echo "::error::could not push $BRANCH even with --force-with-lease. The remote branch moved unexpectedly; delete it and re-run."
+            exit 1
+          fi
           gh pr create --base integration --head "$BRANCH" \
             --title "sync: bring integration up to main" \
-            --body "Automated back-sync. \`integration\` was behind \`main\`; without this it keeps drifting and every feature PR into integration carries the backlog in its diff. Tracked in the platform-overhaul back-sync ticket (Forgejo 691)." \
+            --body "Automated back-sync. integration was behind main; without this it keeps drifting and every feature PR into integration carries the backlog in its diff. Tracked in the platform-overhaul back-sync ticket (Forgejo 691)." \
             || echo "a sync PR may already be open"
+
+          # Self-complete the back-sync so these PRs CONVERGE instead of piling up behind the
+          # integration 1-review rule. The synced content is by definition ALREADY on main --
+          # reviewed on the way in, or an approved direct-to-main hotfix -- so it does not need a
+          # fresh review on the way back down. Merge it with the app token (admin), exactly how
+          # gitops-advance-dev merges its own PRs. This is what makes "keeps integration from
+          # drifting" actually hold: without it the opened PR sat review-gated forever, which is
+          # the very drift this workflow exists to prevent. Falls back to auto-merge.
+          #
+          # THIS STEP MUST FAIL THE JOB IF IT CANNOT MERGE. It previously ended in a bare
+          # `echo "::warning::"`, which leaves the job GREEN. That hid a total failure of the
+          # self-merge: the app token has no review bypass on `integration`, so every --admin
+          # attempt came back
+          #     GraphQL: At least 1 approving review is required by reviewers with write access.
+          # and every --auto attempt after it also failed. The job reported success each time while
+          # converging nothing, and four sync PRs stacked up unnoticed -- the exact pileup this
+          # self-merge was added to prevent. A back-sync that did not sync is a FAILURE and has to
+          # be red, because the damage (integration drifting behind main) is invisible otherwise.
+          #
+          # The durable fix is to let this workflow's app bypass the review rule on the
+          # gitops/sync-integration-* branch pattern, so the merge succeeds outright. Until that
+          # ruleset change is in place this job will go red and a human approves the PR by hand --
+          # which is the correct, honest behaviour, not a regression.
+          PRNUM="$(gh pr list --head "$BRANCH" --base integration --state open --json number --jq '.[0].number // empty' || true)"
+          if [ -z "$PRNUM" ]; then
+            # The PR was pushed and `gh pr create` ran, so one must exist. Finding none means the
+            # create failed for a reason its `|| echo` swallowed. Do not exit 0 on this path: that
+            # is the same silent-success hole in a different place.
+            echo "::error::pushed $BRANCH but no open sync PR into integration could be found. The PR was not created; integration is still behind main."
+            {
+              echo "### Back-sync FAILED"
+              echo "Pushed \`$BRANCH\` but no open sync PR into \`integration\` exists."
+              echo "\`integration\` is still behind \`main\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          MERGE_LOG="$(mktemp)"
+          if gh pr merge "$PRNUM" --merge --admin --delete-branch >"$MERGE_LOG" 2>&1 \
+            || gh pr merge "$PRNUM" --merge --auto --delete-branch >>"$MERGE_LOG" 2>&1; then
+            echo "sync PR #$PRNUM merged; integration is up to date with main."
+          else
+            # Surface the real reason instead of a generic message. The GraphQL error text is what
+            # tells you whether this is the review rule, a failing required check, or something new.
+            echo "----- gh pr merge output -----"
+            cat "$MERGE_LOG"
+            echo "------------------------------"
+            echo "::error::sync PR #$PRNUM could not be merged; integration is STILL behind main. See the merge output above for the reason."
+            {
+              echo "### Back-sync FAILED"
+              echo "Sync PR #$PRNUM was opened but could not be merged, so \`integration\` is **still behind \`main\`**."
+              echo ""
+              echo "Approve and merge that PR to converge, then re-run this workflow."
+              echo ""
+              echo '```'
+              cat "$MERGE_LOG"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
