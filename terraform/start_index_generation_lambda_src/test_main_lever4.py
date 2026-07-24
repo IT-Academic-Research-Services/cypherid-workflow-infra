@@ -11,10 +11,17 @@ import types
 captured = {"sfn_input": None, "put_objects": []}
 
 _PRIOR = "ncbi-indexes-dev/2026-07-09/index-generation-2"
+# A smoke-test directory that sorts ABOVE every real dated index run. This is the exact shape
+# that poisoned the prepared full-run input: 386-byte synthetic artifacts under a non-dated
+# sibling prefix won on lexicographic order. Nothing under it may ever be selected.
+_SMOKE = "ncbi-indexes-dev/smoketest-graviton/be3e4378c/download"
 _PRIOR_KEYS = [
     f"{_PRIOR}/nt_compressed.fa",
     f"{_PRIOR}/nr_compressed.fa",
     f"{_PRIOR}/versioned-taxid-lineages.csv.gz",
+    f"{_SMOKE}/nt_compressed.fa",
+    f"{_SMOKE}/nr_compressed.fa",
+    f"{_SMOKE}/versioned-taxid-lineages.csv.gz",
 ]
 
 
@@ -73,14 +80,19 @@ def run(scope=None, extra=None):
     return captured["sfn_input"]["Input"]
 
 
-# ---- full (default): priors seed incremental compression, NO scope-driven reuse skip ----
+# ---- full (default): a full rebuild, NEVER seeded, NO scope-driven reuse skip ----
+# Seeded compression emits the delta only and nothing recombines seed + delta, so an
+# auto-seeded "full" run silently produces an incomplete index. The lambda must never inject
+# previous_*_compressed into a compress lane, even though a prior run exists in the listing.
 inp = run("full")
 assert "provided_nt" not in inp["DownloadNT"], "full: NT must download, not reuse"
 assert "provided_nr" not in inp["DownloadNR"], "full: NR must download, not reuse"
 assert "skip_nuc_compression" not in inp["CompressNT"]
 assert "skip_protein_compression" not in inp["CompressNR"]
-assert inp["CompressNT"]["previous_nt_compressed"] == _PRIOR_NT, "full: still seeds incremental"
-assert inp["CompressNR"]["previous_nr_compressed"] == _PRIOR_NR
+assert "previous_nt_compressed" not in inp["CompressNT"], "full: must NOT seed compression"
+assert "previous_nr_compressed" not in inp["CompressNR"], "full: must NOT seed compression"
+assert inp["CompressNT"] == {"docker_image_id": inp["CompressNT"]["docker_image_id"]}
+assert inp["CompressNR"] == {"docker_image_id": inp["CompressNR"]["docker_image_id"]}
 
 # ---- nt_only: NT builds fully; NR reuses prior + skips compression ----
 inp = run("nt_only")
@@ -118,6 +130,20 @@ assert inp["DownloadTaxonomy"]["provided_taxdump"] == "s3://other-bucket/snap/20
 # ---- explicit skip override wins over scope default ----
 inp = run("nr_only", {"skip_nuc_compression": False})
 assert inp["CompressNT"]["skip_nuc_compression"] is False, "explicit override must win"
+
+# ---- prior-run discovery ignores non-dated (smoke-test) prefixes ----
+# _SMOKE sorts above _PRIOR, so if the scan were still unrestricted these would resolve to the
+# smoke-test artifacts and a scoped refresh would reuse a 386-byte synthetic file as the whole
+# database. Every consumer of the discovered priors must land on the real dated run.
+inp = run("lineage_only")
+assert _SMOKE not in inp["DownloadNT"]["provided_nt"], "must not reuse a smoke-test artifact"
+assert _SMOKE not in inp["DownloadNR"]["provided_nr"], "must not reuse a smoke-test artifact"
+assert inp["DownloadNT"]["provided_nt"] == _PRIOR_NT
+assert inp["DownloadNR"]["provided_nr"] == _PRIOR_NR
+assert _SMOKE not in inp["IndexTaxonomy"]["previous_lineages"]
+assert inp["IndexTaxonomy"]["previous_lineages"].endswith(
+    f"{_PRIOR}/versioned-taxid-lineages.csv.gz"
+)
 
 # ---- invalid scope rejected ----
 try:
