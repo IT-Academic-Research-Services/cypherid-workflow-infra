@@ -195,8 +195,15 @@ States:
               JobQueue: "${index_generation_compress_job_queue_arn}"
               JobName.$: $$.Execution.Name
               JobDefinition: *JobDefinition
+              # Anchor shared by CompressNR and CompressNT (the two Phase-2 lanes).
+              # Raised 24h -> 48h. At gp3 defaults the full-scale core_nt compress had a
+              # ~26 h I/O floor, i.e. it would have hit the old 24 h cap and been killed
+              # after a full day of paid compute. The provisioned-IOPS scratch volume
+              # (index-generation.tf, compress stage) brings the expected wall clock to
+              # ~8-10 h, so this is headroom, not the primary fix: it exists so a slow run
+              # finishes and can be measured rather than being truncated at the cap.
               Timeout: &CompressBatchTimeout
-                AttemptDurationSeconds: 86400 # 24 hours
+                AttemptDurationSeconds: 172800 # 48 hours
               ContainerOverrides:
                 Memory.$: $.CompressEC2Memory
                 Environment:

@@ -1,8 +1,11 @@
 # Dedicated arm64 (Graviton) Batch job definition for the multi-stage index-generation stages
 # (Lever 2, CZID-776).
 #
-# The shared swipe main job-def (idseq-swipe-dev-main) runs the amd64 SWIPE runner image
-# (ghcr.io/chanzuckerberg/swipe:v1.4.9). AWS Batch launches THAT orchestrator image (not our
+# The shared swipe main job-def (idseq-swipe-dev-main) runs the amd64 SWIPE runner image.
+# (That image reference is rendered by the swipe module from its own `version` file -- it was
+# ghcr.io/chanzuckerberg/swipe:v1.4.9 when this file was written, then an ECR -ucsf tag. It is
+# NOT hardcoded here or anywhere else in this repo; see the note in swipe.tf.) AWS Batch
+# launches THAT orchestrator image (not our
 # per-task index-generation image), and it is amd64-only, so on the arm64/Graviton
 # index-generation compute environments it dies with `exec /usr/local/bin/init.sh: exec format
 # error`. This job-def is a clone of the deployed swipe_main container properties with the

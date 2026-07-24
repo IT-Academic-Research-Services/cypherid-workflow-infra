@@ -106,9 +106,29 @@ locals {
       # box, so max_vcpus must fit BOTH at once (2 x 48 = 96) -- at 48 they would serialize
       # and silently lose the compress parallelism the fan-out exists for. Each lane still
       # gets its own r6i.12xlarge node + its own 4 TB scratch (isolated, no shared-disk #798).
-      max_vcpus    = 96
-      scratch_gb   = 4096
-      provisioning = "EC2"
+      max_vcpus  = 96
+      scratch_gb = 4096
+      # EBS PERFORMANCE OVERRIDE (compress only). ncbi-compress is the one index-generation
+      # stage that is disk-throughput-bound, not CPU-bound: it streams the whole core_nt.fsa
+      # out to ~2.3M per-taxid files and reads them all back. On gp3 DEFAULTS (3,000 IOPS /
+      # 125 MiB/s -- what every stage got before this override) the full-scale run has a
+      # ~26 h I/O floor, which is over the 48 h SFN attempt cap's old 24 h value and wastes
+      # ~50 USD of idle 48-vCPU box per run waiting on the disk. The 8 GiB core_nt slice
+      # de-risk run confirmed the volume was pinned at 3000/125.
+      #
+      # 16,000 IOPS / 1,000 MiB/s drops that floor to ~3.3 h and makes the stage CPU-bound
+      # (~8-10 h). r7g.12xlarge has ~1,875 MiB/s of EBS bandwidth so 1,000 MiB/s is inside
+      # the instance limit with headroom. Cost of the provisioned extra is ~0.137 USD/hour,
+      # i.e. ~5 USD per run -- an order of magnitude less than the idle-compute it saves.
+      #
+      # Scoped deliberately: the launch template is created per-stage (for_each over this
+      # map), so only the compress stage's template carries the override. Every other stage
+      # leaves these null and keeps gp3 defaults -- the download stages are network-bound on
+      # the NCBI pull and the index stages are CPU/RAM-bound, so paying for provisioned IOPS
+      # there would be pure cost with no wall-clock return.
+      scratch_iops       = 16000
+      scratch_throughput = 1000
+      provisioning       = "EC2"
     }
     index_spot = {
       instance_types_x86      = ["r6i.4xlarge", "r6i.8xlarge", "r6i.12xlarge"]
@@ -129,12 +149,18 @@ locals {
   # Effective per-stage map consumed by the launch templates, compute environments, and
   # queues below. Selects the x86 or Graviton family per stage from var.use_graviton; every
   # other field is copied through unchanged. This is the single place the arch switch happens.
+  # scratch_iops / scratch_throughput are OPTIONAL per-stage gp3 performance overrides: a
+  # stage that does not declare them resolves to null here and the launch template omits the
+  # argument, leaving AWS's gp3 defaults (3,000 IOPS / 125 MiB/s). Only `compress` sets them
+  # today -- see the comment on that stage for why.
   index_generation_stages = {
     for name, cfg in local.index_generation_stages_base : name => {
-      instance_types = var.use_graviton ? cfg.instance_types_graviton : cfg.instance_types_x86
-      max_vcpus      = cfg.max_vcpus
-      scratch_gb     = cfg.scratch_gb
-      provisioning   = cfg.provisioning
+      instance_types     = var.use_graviton ? cfg.instance_types_graviton : cfg.instance_types_x86
+      max_vcpus          = cfg.max_vcpus
+      scratch_gb         = cfg.scratch_gb
+      scratch_iops       = try(cfg.scratch_iops, null)
+      scratch_throughput = try(cfg.scratch_throughput, null)
+      provisioning       = cfg.provisioning
     }
   }
 }
@@ -280,11 +306,15 @@ resource "aws_launch_template" "index_generation" {
   }
 
   # Single per-stage scratch volume (gp3), sized to that phase's working set only.
+  # iops/throughput are null for every stage except compress, and a null argument is omitted
+  # so those volumes keep the gp3 baseline (3,000 IOPS / 125 MiB/s).
   block_device_mappings {
     device_name = "/dev/sdf"
     ebs {
       volume_size           = each.value.scratch_gb
       volume_type           = "gp3"
+      iops                  = each.value.scratch_iops
+      throughput            = each.value.scratch_throughput
       encrypted             = true
       delete_on_termination = true
     }
@@ -472,7 +502,24 @@ resource "aws_lambda_function" "start_index_generation" {
       # Fan-out index-generation version (semver SSOT, platform-overhaul #843). Must match the
       # published WDL prefix s3://<workflows>/index-generation-<VER>/ and the ECR tag
       # index-generation:<VER>. Bump all three together when releasing a new index-gen version.
-      INDEX_GENERATION_WORKFLOW_VERSION = "v2.5.0"
+      # v2.5.2 -- the first index-generation release built from source by CI rather than by hand.
+      # This one variable is the SSOT for BOTH the ECR image tag (index-generation:<version>) and the
+      # S3 WDL prefix (index-generation-<version>/), so both must exist before it is bumped. Both do:
+      #   ECR  index-generation:v2.5.2 -> sha256:2c98beb6f1eb36ad3f3458f99236827db8fa198a713bd844ddce4fae1ff29d88
+      #        multi-arch (linux/amd64 + linux/arm64); the arm64 entry is what the Graviton compress
+      #        nodes actually execute. Same digest as the CI build c5ffdf7 -- retagged, not rebuilt.
+      #   S3   index-generation-v2.5.2/ -> a BYTE-IDENTICAL copy of the v2.5.0 WDLs (9/9 etags match).
+      #
+      # The WDLs are deliberately unchanged. The deployed v2.5.0 set carries the Lever 3 (801)
+      # parallel blastdbcmd extract, which lives on main; every fix in this image (superkingdom
+      # restore, the ncbi-compress split-chunk-size fix, the multi-arch build) lives on
+      # index-gen-lever2-fanout, which does NOT have Lever 3. Publishing WDLs from that branch would
+      # have silently regressed the download stage. So v2.5.2 changes the IMAGE ONLY. Reconciling the
+      # two lineages is tracked separately.
+      #
+      # v2.5.1 is skipped on purpose: v2.5.1-superkingdom is a hand-built overlay image, and an
+      # adjacent v2.5.1 release tag would be easy to confuse with it.
+      INDEX_GENERATION_WORKFLOW_VERSION = "v2.5.2"
       AWS_ACCOUNT_ID                    = var.AWS_ACCOUNT_ID
       # Per-stage container memory (MB) for the multi-stage pipeline (Lever 1, Track A).
       # Replaces the single MEMORY/VCPU override of the old monolith. VCPU is now set by

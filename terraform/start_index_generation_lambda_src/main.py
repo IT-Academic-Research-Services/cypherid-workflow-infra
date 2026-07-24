@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from uuid import uuid4
 
 import boto3
@@ -128,9 +129,25 @@ def start_index_generation(event, *args):
     sfn = boto3.client("stepfunctions")
     s3 = boto3.client("s3")
 
-    # Seed the taxonomy lineage build + the compress lanes incrementally from the most recent
-    # prior run, if any (Lever 4 -- unchanged inputs cache-hit; a seeded compress only builds
-    # the delta).
+    # Discover the most recent prior run's artifacts. Used for (a) the taxonomy lineage
+    # incremental build and (b) the Lever 4 refresh_scope reuse path, where an out-of-scope DB
+    # lane is fed the prior compressed fasta directly and skips compression entirely.
+    #
+    # These are NOT used to seed compression any more -- see the comment on compress_nt_input
+    # below.
+    #
+    # ELIGIBILITY: only keys under a DATE-named index directory
+    # (ncbi-indexes-<env>/YYYY-MM-DD.../) count as a prior run. The previous code scanned the
+    # whole ncbi-indexes-<env>/ prefix and took the lexicographically greatest match, so any
+    # ad-hoc sibling prefix could win purely on sort order -- and one did: a smoke-test
+    # directory ("smoketest-graviton/...") sorted above every real dated run, so the prepared
+    # full-run input was pointed at a 386-byte synthetic ACGT artifact. Sorting a smoke-test
+    # fixture ahead of a real index is the actual defect; restricting the scan to dated index
+    # directories fixes it for BOTH consumers (a scoped refresh would otherwise have reused
+    # that same 386-byte file as provided_nt and skipped compression, yielding an empty index).
+    prior_run_key = re.compile(
+        rf"^ncbi-indexes-{re.escape(deployment_environment)}/\d{{4}}-\d{{2}}-\d{{2}}[^/]*/"
+    )
     previous_lineages = None
     previous_nt_compressed = None
     previous_nr_compressed = None
@@ -141,6 +158,8 @@ def start_index_generation(event, *args):
     for page in pages:
         for obj in page.get("Contents", []):
             key = obj["Key"]
+            if not prior_run_key.match(key):
+                continue
             if key.endswith("versioned-taxid-lineages.csv.gz") and (
                 not previous_lineages or key > previous_lineages
             ):
@@ -200,13 +219,26 @@ def start_index_generation(event, *args):
     if provided_nr:
         download_nr_input["provided_nr"] = provided_nr
 
+    # NO AUTO-SEEDING. These lanes used to be handed previous_nt_compressed /
+    # previous_nr_compressed so ncbi-compress would run in seeded ("incremental") mode against
+    # the prior run. That is removed because seeded compression is BROKEN in a way that fails
+    # GREEN: it emits the DELTA ONLY -- input records contained in the seed are dropped, the
+    # seed's own records are never written to the output, and nothing downstream recombines
+    # them (the NT index lane builds from CompressNT.compressed). A seeded run therefore
+    # produces an index missing everything the seed represented, with no error and no warning.
+    #
+    # This is not hypothetical: the prepared full core_nt rerun input was auto-seeded from a
+    # 386-byte synthetic smoke-test artifact and would have shipped a silently incomplete
+    # index. The underlying ncbi-compress defects (delta-only output, the seed re-sketched
+    # once per taxid file, and seed suppression leaking across unrelated taxa) are tracked on
+    # Forgejo as the seeded-compression bug; feat/ncbi-compress-seed-fasta must not merge
+    # as-is. Re-enable seeding here only once that is fixed AND a seeded rebuild has been
+    # AUPR-benchmarked as equivalent to a full rebuild.
+    #
+    # The Lever 4 refresh_scope reuse path below is unaffected: it reuses the prior compressed
+    # fasta WHOLE (as the download output) and skips compression, so no delta semantics apply.
     compress_nt_input = {"docker_image_id": docker_image_id}
-    if previous_nt_compressed:
-        compress_nt_input["previous_nt_compressed"] = s3_uri(previous_nt_compressed)
-
     compress_nr_input = {"docker_image_id": docker_image_id}
-    if previous_nr_compressed:
-        compress_nr_input["previous_nr_compressed"] = s3_uri(previous_nr_compressed)
 
     # Lever 4 (802) refresh_scope: an out-of-scope DB lane reuses the prior run's compressed
     # fasta and skips (re)compression, so a scoped refresh pays neither the download nor the
