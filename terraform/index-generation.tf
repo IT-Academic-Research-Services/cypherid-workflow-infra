@@ -106,9 +106,29 @@ locals {
       # box, so max_vcpus must fit BOTH at once (2 x 48 = 96) -- at 48 they would serialize
       # and silently lose the compress parallelism the fan-out exists for. Each lane still
       # gets its own r6i.12xlarge node + its own 4 TB scratch (isolated, no shared-disk #798).
-      max_vcpus    = 96
-      scratch_gb   = 4096
-      provisioning = "EC2"
+      max_vcpus  = 96
+      scratch_gb = 4096
+      # EBS PERFORMANCE OVERRIDE (compress only). ncbi-compress is the one index-generation
+      # stage that is disk-throughput-bound, not CPU-bound: it streams the whole core_nt.fsa
+      # out to ~2.3M per-taxid files and reads them all back. On gp3 DEFAULTS (3,000 IOPS /
+      # 125 MiB/s -- what every stage got before this override) the full-scale run has a
+      # ~26 h I/O floor, which is over the 48 h SFN attempt cap's old 24 h value and wastes
+      # ~50 USD of idle 48-vCPU box per run waiting on the disk. The 8 GiB core_nt slice
+      # de-risk run confirmed the volume was pinned at 3000/125.
+      #
+      # 16,000 IOPS / 1,000 MiB/s drops that floor to ~3.3 h and makes the stage CPU-bound
+      # (~8-10 h). r7g.12xlarge has ~1,875 MiB/s of EBS bandwidth so 1,000 MiB/s is inside
+      # the instance limit with headroom. Cost of the provisioned extra is ~0.137 USD/hour,
+      # i.e. ~5 USD per run -- an order of magnitude less than the idle-compute it saves.
+      #
+      # Scoped deliberately: the launch template is created per-stage (for_each over this
+      # map), so only the compress stage's template carries the override. Every other stage
+      # leaves these null and keeps gp3 defaults -- the download stages are network-bound on
+      # the NCBI pull and the index stages are CPU/RAM-bound, so paying for provisioned IOPS
+      # there would be pure cost with no wall-clock return.
+      scratch_iops       = 16000
+      scratch_throughput = 1000
+      provisioning       = "EC2"
     }
     index_spot = {
       instance_types_x86      = ["r6i.4xlarge", "r6i.8xlarge", "r6i.12xlarge"]
@@ -129,12 +149,18 @@ locals {
   # Effective per-stage map consumed by the launch templates, compute environments, and
   # queues below. Selects the x86 or Graviton family per stage from var.use_graviton; every
   # other field is copied through unchanged. This is the single place the arch switch happens.
+  # scratch_iops / scratch_throughput are OPTIONAL per-stage gp3 performance overrides: a
+  # stage that does not declare them resolves to null here and the launch template omits the
+  # argument, leaving AWS's gp3 defaults (3,000 IOPS / 125 MiB/s). Only `compress` sets them
+  # today -- see the comment on that stage for why.
   index_generation_stages = {
     for name, cfg in local.index_generation_stages_base : name => {
-      instance_types = var.use_graviton ? cfg.instance_types_graviton : cfg.instance_types_x86
-      max_vcpus      = cfg.max_vcpus
-      scratch_gb     = cfg.scratch_gb
-      provisioning   = cfg.provisioning
+      instance_types     = var.use_graviton ? cfg.instance_types_graviton : cfg.instance_types_x86
+      max_vcpus          = cfg.max_vcpus
+      scratch_gb         = cfg.scratch_gb
+      scratch_iops       = try(cfg.scratch_iops, null)
+      scratch_throughput = try(cfg.scratch_throughput, null)
+      provisioning       = cfg.provisioning
     }
   }
 }
@@ -280,11 +306,15 @@ resource "aws_launch_template" "index_generation" {
   }
 
   # Single per-stage scratch volume (gp3), sized to that phase's working set only.
+  # iops/throughput are null for every stage except compress, and a null argument is omitted
+  # so those volumes keep the gp3 baseline (3,000 IOPS / 125 MiB/s).
   block_device_mappings {
     device_name = "/dev/sdf"
     ebs {
       volume_size           = each.value.scratch_gb
       volume_type           = "gp3"
+      iops                  = each.value.scratch_iops
+      throughput            = each.value.scratch_throughput
       encrypted             = true
       delete_on_termination = true
     }
