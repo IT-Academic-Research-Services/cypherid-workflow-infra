@@ -502,7 +502,24 @@ resource "aws_lambda_function" "start_index_generation" {
       # Fan-out index-generation version (semver SSOT, platform-overhaul #843). Must match the
       # published WDL prefix s3://<workflows>/index-generation-<VER>/ and the ECR tag
       # index-generation:<VER>. Bump all three together when releasing a new index-gen version.
-      INDEX_GENERATION_WORKFLOW_VERSION = "v2.5.0"
+      # v2.5.2 -- the first index-generation release built from source by CI rather than by hand.
+      # This one variable is the SSOT for BOTH the ECR image tag (index-generation:<version>) and the
+      # S3 WDL prefix (index-generation-<version>/), so both must exist before it is bumped. Both do:
+      #   ECR  index-generation:v2.5.2 -> sha256:2c98beb6f1eb36ad3f3458f99236827db8fa198a713bd844ddce4fae1ff29d88
+      #        multi-arch (linux/amd64 + linux/arm64); the arm64 entry is what the Graviton compress
+      #        nodes actually execute. Same digest as the CI build c5ffdf7 -- retagged, not rebuilt.
+      #   S3   index-generation-v2.5.2/ -> a BYTE-IDENTICAL copy of the v2.5.0 WDLs (9/9 etags match).
+      #
+      # The WDLs are deliberately unchanged. The deployed v2.5.0 set carries the Lever 3 (801)
+      # parallel blastdbcmd extract, which lives on main; every fix in this image (superkingdom
+      # restore, the ncbi-compress split-chunk-size fix, the multi-arch build) lives on
+      # index-gen-lever2-fanout, which does NOT have Lever 3. Publishing WDLs from that branch would
+      # have silently regressed the download stage. So v2.5.2 changes the IMAGE ONLY. Reconciling the
+      # two lineages is tracked separately.
+      #
+      # v2.5.1 is skipped on purpose: v2.5.1-superkingdom is a hand-built overlay image, and an
+      # adjacent v2.5.1 release tag would be easy to confuse with it.
+      INDEX_GENERATION_WORKFLOW_VERSION = "v2.5.2"
       AWS_ACCOUNT_ID                    = var.AWS_ACCOUNT_ID
       # Per-stage container memory (MB) for the multi-stage pipeline (Lever 1, Track A).
       # Replaces the single MEMORY/VCPU override of the old monolith. VCPU is now set by
