@@ -99,14 +99,19 @@ locals {
       provisioning = "EC2"
     }
     compress = {
-      instance_types_x86      = ["r6i.12xlarge"] # 48 vCPU / 384 GB
-      instance_types_graviton = ["r7g.12xlarge"] # 48 vCPU / 384 GB (Graviton3)
-      # Fan-out (800): CompressNR and CompressNT run CONCURRENTLY (Phase-2 lanes), both on
-      # this one compress compute environment. Each ncbi-compress job needs the whole 48-vCPU
-      # box, so max_vcpus must fit BOTH at once (2 x 48 = 96) -- at 48 they would serialize
-      # and silently lose the compress parallelism the fan-out exists for. Each lane still
-      # gets its own r6i.12xlarge node + its own 4 TB scratch (isolated, no shared-disk #798).
-      max_vcpus  = 96
+      instance_types_x86      = ["r6i.32xlarge", "r6i.12xlarge"] # 128 vCPU / 1024 GB ; 48 / 384
+      instance_types_graviton = ["r8g.48xlarge", "r8g.12xlarge"] # 192 vCPU / 1536 GB (Graviton4) ; 48 / 384
+      # Fan-out (800): CompressNR and CompressNT run CONCURRENTLY (Phase-2 lanes) on this one
+      # compute environment. Batch places each lane on the SMALLEST listed instance that fits its
+      # runtime request, so the two lanes size INDEPENDENTLY (869):
+      #   - CompressNR requests 192 vCPU / 1450 GB -> r8g.48xlarge (Graviton4). ncbi-compress now
+      #     parallelizes ACROSS taxids (per-taxid dedup is independent), so it scales with cores
+      #     instead of the old serial one-taxid-at-a-time loop that pinned 48 cores at 99% for
+      #     ~34 h on core_nt. The large RAM is what lets many taxid units run concurrently.
+      #   - CompressNT requests 48 vCPU / 384 GB   -> r8g.12xlarge. NT is I/O-bound (the EBS
+      #     override below is for it); more cores do nothing, so it stays small and cheap.
+      # max_vcpus must fit BOTH concurrently: NR(192) + NT(48) = 240, rounded to 256 for headroom.
+      max_vcpus  = 256
       scratch_gb = 4096
       # EBS PERFORMANCE OVERRIDE (compress only). ncbi-compress is the one index-generation
       # stage that is disk-throughput-bound, not CPU-bound: it streams the whole core_nt.fsa
