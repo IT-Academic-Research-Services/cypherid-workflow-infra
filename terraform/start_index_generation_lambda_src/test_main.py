@@ -69,7 +69,8 @@ os.environ.update({
     "BUCKET": "seqtoid-public-references",
     "S3_WORKFLOWS_BUCKET": "seqtoid-workflows-dev-491013321714",
     "DOWNLOAD_MEMORY": "14000",
-    "COMPRESS_MEMORY": "380000",
+    "COMPRESS_NR_MEMORY": "1450000",
+    "COMPRESS_NT_MEMORY": "380000",
     "INDEX_SPOT_MEMORY": "128000",
     "INDEX_EC2_MEMORY": "250000",
 })
@@ -98,7 +99,8 @@ expected_uri_keys = {
 }
 assert set(d) == expected_uri_keys | {
     "STAGES_IO_MAP_JSON", "Input", "OutputPrefix",
-    "DownloadEC2Memory", "CompressEC2Memory", "IndexSPOTMemory", "IndexEC2Memory",
+    "DownloadEC2Memory", "CompressNREC2Memory", "CompressNTEC2Memory",
+    "IndexSPOTMemory", "IndexEC2Memory",
 }, f"top-level keys: {sorted(d)}"
 assert d["DOWNLOAD_NR_WDL_URI"].endswith("index-generation-v2.4.8/download-nr.wdl")
 assert d["INDEX_NT_WDL_URI"].endswith("index-generation-v2.4.8/index-nt.wdl")
@@ -133,7 +135,8 @@ assert d["STAGES_IO_MAP_JSON"].endswith("2026-07-21/stage_io_map.json")
 
 # ---- memory overrides pass through ----
 assert d["DownloadEC2Memory"] == 14000
-assert d["CompressEC2Memory"] == 380000
+assert d["CompressNREC2Memory"] == 1450000
+assert d["CompressNTEC2Memory"] == 380000
 assert d["IndexSPOTMemory"] == 128000
 assert d["IndexEC2Memory"] == 250000
 
