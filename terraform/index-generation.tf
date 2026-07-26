@@ -601,10 +601,20 @@ resource "aws_lambda_function" "start_index_generation" {
       # Per-stage container memory (MB) for the multi-stage pipeline (Lever 1, Track A).
       # Replaces the single MEMORY/VCPU override of the old monolith. VCPU is now set by
       # each stage's compute-environment instance family, not a container override.
-      DOWNLOAD_MEMORY     = "14000"  # c6i.2xlarge (16 GB), IO-bound download
-      COMPRESS_MEMORY     = "380000" # r6i.12xlarge (384 GB), ncbi-compress
-      INDEX_SPOT_MEMORY   = "128000" # index build on spot
-      INDEX_EC2_MEMORY    = "250000" # index build on the on-demand fallback
+      DOWNLOAD_MEMORY = "14000" # c6i.2xlarge (16 GB), IO-bound download
+      # Compress container memory (MB) -> emitted as CompressEC2Memory. Batch selects the compress
+      # instance by MEMORY (the job's vcpu request is 1; the container then uses all cores of the
+      # instance its memory footprint lands on), so this value is what steers the lane onto a given
+      # box. 1450000 (1450 GB) only fits r8g.48xlarge (1536 GB / 192 vCPU, 869 CE) -> the parallel-
+      # over-taxids NR compress runs across all 192 cores. r7g/r8g.12xlarge (384 GB) can no longer
+      # hold it, which is intended: the whole point of v2.5.3 is to stop pinning NR compress to 48
+      # cores. NOTE: this single knob feeds BOTH CompressNR and CompressNT, so CompressNT also
+      # requests 1450 GB and lands on r8g.48xlarge; with max_vcpus 256 the two Phase-2 lanes
+      # therefore serialize rather than run concurrently. Splitting into COMPRESS_NR_MEMORY /
+      # COMPRESS_NT_MEMORY (so NT keeps 384 GB and the lanes overlap) is a follow-up.
+      COMPRESS_MEMORY     = "1450000" # r8g.48xlarge (1536 GB / 192 vCPU), parallel ncbi-compress (869)
+      INDEX_SPOT_MEMORY   = "128000"  # index build on spot
+      INDEX_EC2_MEMORY    = "250000"  # index build on the on-demand fallback
       BUCKET              = data.aws_s3_bucket.public-references.bucket
       S3_WORKFLOWS_BUCKET = aws_s3_bucket.workflows.bucket
     }
