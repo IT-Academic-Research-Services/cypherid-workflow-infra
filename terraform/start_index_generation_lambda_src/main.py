@@ -89,7 +89,13 @@ def start_index_generation(event, *args):
 
     # Per-stage container memory (MB). The SFN template reads these per lane/phase.
     download_memory = int(os.environ["DOWNLOAD_MEMORY"])
-    compress_memory = int(os.environ["COMPRESS_MEMORY"])
+    # CompressNR and CompressNT size independently (869): NR needs a 1450 GB box (r8g.48xlarge,
+    # 192 cores) for the parallel-over-taxids compress; NT is I/O-bound and stays on 384 GB
+    # (r8g.12xlarge). Batch selects the instance by the job's memory request, so these are two
+    # separate knobs -- a single shared value would force NT onto the big box and serialize the
+    # two Phase-2 lanes.
+    compress_nr_memory = int(os.environ["COMPRESS_NR_MEMORY"])
+    compress_nt_memory = int(os.environ["COMPRESS_NT_MEMORY"])
     index_spot_memory = int(os.environ["INDEX_SPOT_MEMORY"])
     index_ec2_memory = int(os.environ["INDEX_EC2_MEMORY"])
 
@@ -284,7 +290,8 @@ def start_index_generation(event, *args):
         "OutputPrefix": output_prefix,
         # Per-stage container memory overrides consumed by the SFN template.
         "DownloadEC2Memory": download_memory,
-        "CompressEC2Memory": compress_memory,
+        "CompressNREC2Memory": compress_nr_memory,
+        "CompressNTEC2Memory": compress_nt_memory,
         "IndexSPOTMemory": index_spot_memory,
         "IndexEC2Memory": index_ec2_memory,
     }

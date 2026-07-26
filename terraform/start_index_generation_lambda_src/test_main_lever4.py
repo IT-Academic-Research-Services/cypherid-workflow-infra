@@ -57,7 +57,8 @@ os.environ.update({
     "BUCKET": "seqtoid-public-references",
     "S3_WORKFLOWS_BUCKET": "seqtoid-workflows-dev-491013321714",
     "DOWNLOAD_MEMORY": "14000",
-    "COMPRESS_MEMORY": "380000",
+    "COMPRESS_NR_MEMORY": "1450000",
+    "COMPRESS_NT_MEMORY": "380000",
     "INDEX_SPOT_MEMORY": "128000",
     "INDEX_EC2_MEMORY": "250000",
 })
