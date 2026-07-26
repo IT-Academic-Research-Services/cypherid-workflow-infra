@@ -102,22 +102,19 @@ locals {
       instance_types_x86      = ["r6i.32xlarge", "r6i.12xlarge"] # 128 vCPU / 1024 GB ; 48 / 384
       instance_types_graviton = ["r8g.48xlarge", "r8g.12xlarge"] # 192 vCPU / 1536 GB (Graviton4) ; 48 / 384
       # Fan-out (800): CompressNR and CompressNT are the two Phase-2 lanes, both submitted to this
-      # one compute environment. Batch selects the instance by the job's MEMORY request (the vcpu
-      # request is 1; the container then uses every core of the instance it lands on), and that
-      # memory comes from a SINGLE knob -- COMPRESS_MEMORY in the launcher lambda, emitted as
-      # CompressEC2Memory for BOTH lanes (869):
-      #   - COMPRESS_MEMORY = 1450000 (1450 GB) fits only r8g.48xlarge (1536 GB / 192 vCPU,
-      #     Graviton4). CompressNR runs there across all 192 cores: ncbi-compress now parallelizes
-      #     ACROSS taxids (per-taxid dedup is independent), so it scales with cores instead of the
-      #     old serial one-taxid-at-a-time loop that pinned 48 cores at 99% for ~34 h on core_nt.
-      #   - Because the knob is shared, CompressNT ALSO requests 1450 GB and lands on r8g.48xlarge
-      #     too. It is I/O-bound (the EBS override below is for it) and does not need the cores, so
-      #     this is wasteful, and with max_vcpus 256 the two lanes cannot both hold an r8g.48xlarge
-      #     (2 x 192 > 256) -- they SERIALIZE rather than overlap. Splitting the knob into
-      #     COMPRESS_NR_MEMORY / COMPRESS_NT_MEMORY (NT back to 384 GB -> r8g.12xlarge, lanes
-      #     overlap again) is a tracked follow-up; correctness holds without it.
-      # max_vcpus 256 holds one r8g.48xlarge (192) with headroom; raise it if the knob is split so
-      # NR(192) + NT(48) can run concurrently.
+      # one compute environment and running CONCURRENTLY. Batch selects each lane's instance by its
+      # MEMORY request (the vcpu request is 1; the container then uses every core of the instance it
+      # lands on), and each lane has its OWN memory knob in the launcher lambda (869):
+      #   - CompressNR (COMPRESS_NR_MEMORY 1450 GB) -> r8g.48xlarge (1536 GB / 192 vCPU, Graviton4).
+      #     ncbi-compress now parallelizes ACROSS taxids (per-taxid dedup is independent), so it
+      #     scales with cores instead of the old serial one-taxid-at-a-time loop that pinned 48
+      #     cores at 99% for ~34 h on core_nt. The large RAM is what lets many taxid units run at
+      #     once.
+      #   - CompressNT (COMPRESS_NT_MEMORY 384 GB) -> r8g.12xlarge (48 vCPU). NT is I/O-bound (the
+      #     EBS override below is for it); more cores do nothing, so it stays small and cheap and
+      #     runs alongside NR rather than contending for the big box.
+      # max_vcpus must fit BOTH instances concurrently: r8g.48xlarge (192) + r8g.12xlarge (48) = 240
+      # instance vCPUs, so 256 leaves headroom for both lanes at once.
       max_vcpus  = 256
       scratch_gb = 4096
       # EBS PERFORMANCE OVERRIDE (compress only). ncbi-compress is the one index-generation
@@ -545,17 +542,18 @@ resource "aws_lambda_function" "start_index_generation" {
       # Replaces the single MEMORY/VCPU override of the old monolith. VCPU is now set by
       # each stage's compute-environment instance family, not a container override.
       DOWNLOAD_MEMORY = "14000" # c6i.2xlarge (16 GB), IO-bound download
-      # Compress container memory (MB) -> emitted as CompressEC2Memory. Batch selects the compress
-      # instance by MEMORY (the job's vcpu request is 1; the container then uses all cores of the
-      # instance its memory footprint lands on), so this value is what steers the lane onto a given
-      # box. 1450000 (1450 GB) only fits r8g.48xlarge (1536 GB / 192 vCPU, 869 CE) -> the parallel-
-      # over-taxids NR compress runs across all 192 cores. r7g/r8g.12xlarge (384 GB) can no longer
-      # hold it, which is intended: the whole point of v2.5.3 is to stop pinning NR compress to 48
-      # cores. NOTE: this single knob feeds BOTH CompressNR and CompressNT, so CompressNT also
-      # requests 1450 GB and lands on r8g.48xlarge; with max_vcpus 256 the two Phase-2 lanes
-      # therefore serialize rather than run concurrently. Splitting into COMPRESS_NR_MEMORY /
-      # COMPRESS_NT_MEMORY (so NT keeps 384 GB and the lanes overlap) is a follow-up.
-      COMPRESS_MEMORY     = "1450000" # r8g.48xlarge (1536 GB / 192 vCPU), parallel ncbi-compress (869)
+      # Compress container memory (MB), one knob PER Phase-2 lane (869). Batch selects the compress
+      # instance by MEMORY (the job's vcpu request is 1; the container then uses every core of the
+      # instance its memory footprint lands on), so memory is what steers each lane onto a box. The
+      # two lanes size independently so they run CONCURRENTLY on the shared compress CE:
+      #   COMPRESS_NR_MEMORY 1450000 (1450 GB) fits only r8g.48xlarge (1536 GB / 192 vCPU) -> the
+      #     parallel-over-taxids NR compress runs across all 192 cores (was pinned to 48).
+      #   COMPRESS_NT_MEMORY 380000 (380 GB) fits r8g.12xlarge (384 GB / 48 vCPU). NT is I/O-bound,
+      #     so more cores do nothing; keeping it small lets it run alongside NR instead of fighting
+      #     for the big box. A single shared knob would force NT onto r8g.48xlarge too and, under
+      #     max_vcpus 256, serialize the lanes.
+      COMPRESS_NR_MEMORY  = "1450000" # r8g.48xlarge (1536 GB / 192 vCPU), parallel ncbi-compress
+      COMPRESS_NT_MEMORY  = "380000"  # r8g.12xlarge (384 GB / 48 vCPU), I/O-bound nt compress
       INDEX_SPOT_MEMORY   = "128000"  # index build on spot
       INDEX_EC2_MEMORY    = "250000"  # index build on the on-demand fallback
       BUCKET              = data.aws_s3_bucket.public-references.bucket

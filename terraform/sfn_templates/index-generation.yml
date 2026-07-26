@@ -205,7 +205,7 @@ States:
               Timeout: &CompressBatchTimeout
                 AttemptDurationSeconds: 172800 # 48 hours
               ContainerOverrides:
-                Memory.$: $.CompressEC2Memory
+                Memory.$: $.CompressNREC2Memory
                 Environment:
                   - Name: WDL_INPUT_URI
                     Value.$: $.COMPRESS_NR_INPUT_URI
@@ -274,7 +274,7 @@ States:
               JobDefinition: *JobDefinition
               Timeout: *CompressBatchTimeout
               ContainerOverrides:
-                Memory.$: $.CompressEC2Memory
+                Memory.$: $.CompressNTEC2Memory
                 Environment:
                   - Name: WDL_INPUT_URI
                     Value.$: $.COMPRESS_NT_INPUT_URI
