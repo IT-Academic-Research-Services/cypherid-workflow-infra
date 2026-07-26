@@ -567,28 +567,36 @@ resource "aws_lambda_function" "start_index_generation" {
       # Fan-out index-generation version (semver SSOT, platform-overhaul #843). Must match the
       # published WDL prefix s3://<workflows>/index-generation-<VER>/ and the ECR tag
       # index-generation:<VER>. Bump all three together when releasing a new index-gen version.
-      # v2.5.2 -- the first index-generation release built from source by CI rather than by hand.
       # This one variable is the SSOT for BOTH the ECR image tag (index-generation:<version>) and the
       # S3 WDL prefix (index-generation-<version>/), so both must exist before it is bumped. The
       # start_index_generation lambda now enforces this at runtime (SMP-1463): a preflight verifies
       # the WDL prefix (all 9 sub-WDLs) and the ECR tag exist and fails closed BEFORE StartExecution,
       # so a bump to a version whose artifacts are missing is rejected instead of dying inside SWIPE.
-      # Both currently exist:
-      #   ECR  index-generation:v2.5.2 -> sha256:2c98beb6f1eb36ad3f3458f99236827db8fa198a713bd844ddce4fae1ff29d88
-      #        multi-arch (linux/amd64 + linux/arm64); the arm64 entry is what the Graviton compress
-      #        nodes actually execute. Same digest as the CI build c5ffdf7 -- retagged, not rebuilt.
-      #   S3   index-generation-v2.5.2/ -> a BYTE-IDENTICAL copy of the v2.5.0 WDLs (9/9 etags match).
+      # Both do.
       #
-      # The WDLs are deliberately unchanged. The deployed v2.5.0 set carries the Lever 3 (801)
-      # parallel blastdbcmd extract, which lives on main; every fix in this image (superkingdom
-      # restore, the ncbi-compress split-chunk-size fix, the multi-arch build) lives on
-      # index-gen-lever2-fanout, which does NOT have Lever 3. Publishing WDLs from that branch would
-      # have silently regressed the download stage. So v2.5.2 changes the IMAGE ONLY. Reconciling the
-      # two lineages is tracked separately.
+      # v2.5.3 -- parallel-over-taxids NR compress on Graviton (869). First version where the image
+      # AND the compress WDL come from the SAME lineage (main): the v2.5.2 image fixes previously
+      # lived on index-gen-lever2-fanout while the Lever 3 (801) WDLs lived on main, so v2.5.2 had to
+      # ship the image only and keep the v2.5.0 WDLs. Landing the parallel compress on main (seqtoid-
+      # workflows #41) plus the multi-arch CI build (#42) reconciles the compress path, so v2.5.3 can
+      # move the image and the WDL together.
+      #   ECR  index-generation:v2.5.3 -> sha256:2fddfeb9ebe3e3b573968d2f0bc0e6f2d149c184148e0aba8ce18b6cdcab7a1d
+      #        multi-arch (linux/amd64 + linux/arm64); the arm64 entry is what the r8g Graviton
+      #        compress nodes execute. Same digest as CI build 2bf9977 (== main a4ea320 tree) --
+      #        retagged, not rebuilt. First image published by CI as a single OCI index (v2.5.2 used
+      #        hand-built per-arch tags).
+      #   S3   index-generation-v2.5.3/ -> main's 9 fan-out sub-WDLs. The ONLY change vs v2.5.2 is
+      #        compress-nr.wdl (parallel-over-taxids compress; CompressNR sized to 192 vCPU / 1450G
+      #        with COMPRESS_TAXID_CONCURRENCY=96). The other 8 WDLs are byte-identical to v2.5.2, so
+      #        the Lever 3 download/index stages are unchanged.
+      #
+      # COUPLING: v2.5.3's CompressNR requests 192 vCPU, which only places on the r8g compress
+      # compute environment sized in this same change. Apply the CE and this pin together; a pin bump
+      # without the r8g CE would leave CompressNR unschedulable.
       #
       # v2.5.1 is skipped on purpose: v2.5.1-superkingdom is a hand-built overlay image, and an
       # adjacent v2.5.1 release tag would be easy to confuse with it.
-      INDEX_GENERATION_WORKFLOW_VERSION = "v2.5.2"
+      INDEX_GENERATION_WORKFLOW_VERSION = "v2.5.3"
       AWS_ACCOUNT_ID                    = var.AWS_ACCOUNT_ID
       # Per-stage container memory (MB) for the multi-stage pipeline (Lever 1, Track A).
       # Replaces the single MEMORY/VCPU override of the old monolith. VCPU is now set by
