@@ -101,16 +101,23 @@ locals {
     compress = {
       instance_types_x86      = ["r6i.32xlarge", "r6i.12xlarge"] # 128 vCPU / 1024 GB ; 48 / 384
       instance_types_graviton = ["r8g.48xlarge", "r8g.12xlarge"] # 192 vCPU / 1536 GB (Graviton4) ; 48 / 384
-      # Fan-out (800): CompressNR and CompressNT run CONCURRENTLY (Phase-2 lanes) on this one
-      # compute environment. Batch places each lane on the SMALLEST listed instance that fits its
-      # runtime request, so the two lanes size INDEPENDENTLY (869):
-      #   - CompressNR requests 192 vCPU / 1450 GB -> r8g.48xlarge (Graviton4). ncbi-compress now
-      #     parallelizes ACROSS taxids (per-taxid dedup is independent), so it scales with cores
-      #     instead of the old serial one-taxid-at-a-time loop that pinned 48 cores at 99% for
-      #     ~34 h on core_nt. The large RAM is what lets many taxid units run concurrently.
-      #   - CompressNT requests 48 vCPU / 384 GB   -> r8g.12xlarge. NT is I/O-bound (the EBS
-      #     override below is for it); more cores do nothing, so it stays small and cheap.
-      # max_vcpus must fit BOTH concurrently: NR(192) + NT(48) = 240, rounded to 256 for headroom.
+      # Fan-out (800): CompressNR and CompressNT are the two Phase-2 lanes, both submitted to this
+      # one compute environment. Batch selects the instance by the job's MEMORY request (the vcpu
+      # request is 1; the container then uses every core of the instance it lands on), and that
+      # memory comes from a SINGLE knob -- COMPRESS_MEMORY in the launcher lambda, emitted as
+      # CompressEC2Memory for BOTH lanes (869):
+      #   - COMPRESS_MEMORY = 1450000 (1450 GB) fits only r8g.48xlarge (1536 GB / 192 vCPU,
+      #     Graviton4). CompressNR runs there across all 192 cores: ncbi-compress now parallelizes
+      #     ACROSS taxids (per-taxid dedup is independent), so it scales with cores instead of the
+      #     old serial one-taxid-at-a-time loop that pinned 48 cores at 99% for ~34 h on core_nt.
+      #   - Because the knob is shared, CompressNT ALSO requests 1450 GB and lands on r8g.48xlarge
+      #     too. It is I/O-bound (the EBS override below is for it) and does not need the cores, so
+      #     this is wasteful, and with max_vcpus 256 the two lanes cannot both hold an r8g.48xlarge
+      #     (2 x 192 > 256) -- they SERIALIZE rather than overlap. Splitting the knob into
+      #     COMPRESS_NR_MEMORY / COMPRESS_NT_MEMORY (NT back to 384 GB -> r8g.12xlarge, lanes
+      #     overlap again) is a tracked follow-up; correctness holds without it.
+      # max_vcpus 256 holds one r8g.48xlarge (192) with headroom; raise it if the knob is split so
+      # NR(192) + NT(48) can run concurrently.
       max_vcpus  = 256
       scratch_gb = 4096
       # EBS PERFORMANCE OVERRIDE (compress only). ncbi-compress is the one index-generation
