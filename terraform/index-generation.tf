@@ -514,29 +514,29 @@ resource "aws_lambda_function" "start_index_generation" {
       # This one variable is the SSOT for BOTH the ECR image tag (index-generation:<version>) and the
       # S3 WDL prefix (index-generation-<version>/), so both must exist before it is bumped. Both do.
       #
-      # v2.5.3 -- parallel-over-taxids NR compress on Graviton (869). First version where the image
-      # AND the compress WDL come from the SAME lineage (main): the v2.5.2 image fixes previously
-      # lived on index-gen-lever2-fanout while the Lever 3 (801) WDLs lived on main, so v2.5.2 had to
-      # ship the image only and keep the v2.5.0 WDLs. Landing the parallel compress on main (seqtoid-
-      # workflows #41) plus the multi-arch CI build (#42) reconciles the compress path, so v2.5.3 can
-      # move the image and the WDL together.
-      #   ECR  index-generation:v2.5.3 -> sha256:2fddfeb9ebe3e3b573968d2f0bc0e6f2d149c184148e0aba8ce18b6cdcab7a1d
+      # v2.5.4 -- fully reconciled main lineage: parallel-over-taxids NR compress on Graviton (869),
+      # Lever 3 (801) download/index, AND the superkingdom-restore fix, all built from one main image.
+      # v2.5.3 moved the compress path onto main but its image was missing the superkingdom-restore
+      # fix (that fix had lived only on the lever2-fanout image line), so IndexTaxonomy's
+      # GenerateIndexLineages failed the core_nt run with KeyError ['superkingdom'] after NCBI's 2024
+      # rank overhaul dropped the literal superkingdom rank. Cherry-picking that fix (and its pandas
+      # test dep) onto main closes the last divergence, so v2.5.4 is the first version where every fix
+      # ships together.
+      #   ECR  index-generation:v2.5.4 -> sha256:7974969b5247f68b8136cedd1d2d3db3af71c8a57588804513444ac22ad5d7dc
       #        multi-arch (linux/amd64 + linux/arm64); the arm64 entry is what the r8g Graviton
-      #        compress nodes execute. Same digest as CI build 2bf9977 (== main a4ea320 tree) --
-      #        retagged, not rebuilt. First image published by CI as a single OCI index (v2.5.2 used
-      #        hand-built per-arch tags).
-      #   S3   index-generation-v2.5.3/ -> main's 9 fan-out sub-WDLs. The ONLY change vs v2.5.2 is
-      #        compress-nr.wdl (parallel-over-taxids compress; CompressNR sized to 192 vCPU / 1450G
-      #        with COMPRESS_TAXID_CONCURRENCY=96). The other 8 WDLs are byte-identical to v2.5.2, so
-      #        the Lever 3 download/index stages are unchanged.
+      #        compress nodes execute. Retag of the CI build of main commit 46de596 -- built, tested,
+      #        and published as a single OCI index by wdl-ci.
+      #   S3   index-generation-v2.5.4/ -> main's 9 fan-out sub-WDLs, byte-identical to v2.5.3 (the
+      #        superkingdom fix is in the IMAGE, not the WDLs).
       #
-      # COUPLING: v2.5.3's CompressNR requests 192 vCPU, which only places on the r8g compress
-      # compute environment sized in this same change. Apply the CE and this pin together; a pin bump
-      # without the r8g CE would leave CompressNR unschedulable.
+      # COUPLING: v2.5.4's CompressNR requests 192 vCPU, which only places on the r8g compress
+      # compute environment sized in this same change, and CompressNR/CompressNT split their memory
+      # via COMPRESS_NR_MEMORY / COMPRESS_NT_MEMORY below. Apply the CE, the SFN, and this pin
+      # together; the pin alone would leave CompressNR unschedulable.
       #
       # v2.5.1 is skipped on purpose: v2.5.1-superkingdom is a hand-built overlay image, and an
       # adjacent v2.5.1 release tag would be easy to confuse with it.
-      INDEX_GENERATION_WORKFLOW_VERSION = "v2.5.3"
+      INDEX_GENERATION_WORKFLOW_VERSION = "v2.5.4"
       AWS_ACCOUNT_ID                    = var.AWS_ACCOUNT_ID
       # Per-stage container memory (MB) for the multi-stage pipeline (Lever 1, Track A).
       # Replaces the single MEMORY/VCPU override of the old monolith. VCPU is now set by
