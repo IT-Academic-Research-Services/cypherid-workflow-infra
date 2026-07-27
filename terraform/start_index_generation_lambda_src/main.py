@@ -118,8 +118,17 @@ def start_index_generation(event, *args):
     provided_nt = overrides.get("provided_nt")
     nt_database_type = overrides.get("nt_database_type", "nt")
 
-    # Lever 4 (802) refresh_scope: which lanes do real work this run.
-    refresh_scope = overrides.get("refresh_scope", "full")
+    # Annual full-refresh gate: an explicit live NCBI refresh both fetches live AND rebuilds
+    # everything, so it forces refresh_scope=full (never an artifact-reuse skip).
+    live_ncbi_refresh = bool(overrides.get("live_ncbi_refresh", False))
+
+    # Lever 4 (802) refresh_scope: which lanes do real work this run. The default is env-gated
+    # (DEFAULT_REFRESH_SCOPE, default "full") so an environment can make whole-artifact reuse the
+    # default for cheap re-runs without a code change -- dev stays "full" until its env var is
+    # set. An explicit event refresh_scope always wins; live_ncbi_refresh forces "full".
+    refresh_scope = overrides.get("refresh_scope") or os.environ.get("DEFAULT_REFRESH_SCOPE", "full")
+    if live_ncbi_refresh:
+        refresh_scope = "full"
     valid_scopes = ("full", "nt_only", "nr_only", "lineage_only")
     if refresh_scope not in valid_scopes:
         raise ValueError(
@@ -143,7 +152,6 @@ def start_index_generation(event, *args):
     # explicitly opted in. Set live_ncbi_refresh=true on the event to force the live path (and
     # re-pin the snapshot out of band); that is the deliberate, expensive annual refresh.
     default_snapshot_prefix = os.environ.get("DEFAULT_DB_SNAPSHOT_PREFIX", "").strip()
-    live_ncbi_refresh = bool(overrides.get("live_ncbi_refresh", False))
     use_default_snapshot = bool(default_snapshot_prefix) and not live_ncbi_refresh
     if use_default_snapshot and not taxonomy_snapshot_prefix:
         taxonomy_snapshot_prefix = default_snapshot_prefix

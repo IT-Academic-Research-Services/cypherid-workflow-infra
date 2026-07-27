@@ -126,4 +126,50 @@ assert "skip_protein_compression" not in inp["CompressNR"]
 inp = run("ncbi-indexes-dev/db-snapshots/2026-07-09")
 assert inp["DownloadNR"]["provided_nr"] == f"{_BASE}/{_SNAP}/nr.fsa.gz"
 
+# ==== DEFAULT_REFRESH_SCOPE (reuse-as-default) ====
+_PRIOR_NT_C = f"{_BASE}/{_PRIOR}/nt_compressed.fa"
+_PRIOR_NR_C = f"{_BASE}/{_PRIOR}/nr_compressed.fa"
+
+
+def run_scope(default_scope=None, ig=None, snapshot=None):
+    if default_scope is None:
+        os.environ.pop("DEFAULT_REFRESH_SCOPE", None)
+    else:
+        os.environ["DEFAULT_REFRESH_SCOPE"] = default_scope
+    if snapshot is None:
+        os.environ.pop("DEFAULT_DB_SNAPSHOT_PREFIX", None)
+    else:
+        os.environ["DEFAULT_DB_SNAPSHOT_PREFIX"] = snapshot
+    captured["sfn_input"] = None
+    main.start_index_generation({"time": "2026-07-23T08:00:00Z", "index_generation": ig or {}})
+    return captured["sfn_input"]["Input"]
+
+
+# default scope full (unset env): full rebuild, no reuse
+inp = run_scope(None)
+assert "provided_nt" not in inp["DownloadNT"] and "provided_nr" not in inp["DownloadNR"]
+assert "skip_nuc_compression" not in inp["CompressNT"]
+
+# env default lineage_only: BOTH DBs reuse prior compressed + skip compression by default
+inp = run_scope("lineage_only")
+assert inp["DownloadNT"]["provided_nt"] == _PRIOR_NT_C, inp["DownloadNT"]
+assert inp["DownloadNR"]["provided_nr"] == _PRIOR_NR_C
+assert inp["CompressNT"]["skip_nuc_compression"] is True
+assert inp["CompressNR"]["skip_protein_compression"] is True
+
+# explicit event refresh_scope wins over the env default
+inp = run_scope("lineage_only", {"refresh_scope": "full"})
+assert "provided_nt" not in inp["DownloadNT"], "explicit full must override env default"
+assert "skip_nuc_compression" not in inp["CompressNT"]
+
+# live_ncbi_refresh forces full even if the env default is a reuse scope (annual gate)
+inp = run_scope("lineage_only", {"live_ncbi_refresh": True})
+assert "provided_nt" not in inp["DownloadNT"], "live_ncbi_refresh must force full rebuild"
+assert "provided_nr" not in inp["DownloadNR"]
+assert "skip_nuc_compression" not in inp["CompressNT"]
+
+# reset env so nothing leaks
+os.environ.pop("DEFAULT_REFRESH_SCOPE", None)
+os.environ.pop("DEFAULT_DB_SNAPSHOT_PREFIX", None)
+
 print("ALL SNAPSHOT ASSERTIONS PASSED")

@@ -218,6 +218,22 @@ variable "index_gen_default_db_snapshot_prefix" {
   EOT
 }
 
+variable "index_gen_default_refresh_scope" {
+  type        = string
+  default     = "full"
+  description = <<-EOT
+    Default refresh_scope for start_index_generation when the run event does not set one.
+    "full" (the default) rebuilds every DB. Set to "nt_only"/"nr_only"/"lineage_only" to make
+    whole-artifact reuse the default for cheap re-runs (an out-of-scope DB reuses the prior
+    run's compressed fasta and skips compression). dev stays "full" until this is set. An
+    explicit event refresh_scope always wins; live_ncbi_refresh=true forces "full".
+  EOT
+  validation {
+    condition     = contains(["full", "nt_only", "nr_only", "lineage_only"], var.index_gen_default_refresh_scope)
+    error_message = "index_gen_default_refresh_scope must be one of: full, nt_only, nr_only, lineage_only."
+  }
+}
+
 data "aws_ssm_parameter" "idseq_batch_ami" {
   # NOTE: the mock-aws/aws conditional is because moto errors on creating ssm parameters that begin with aws or ssm.
   #
@@ -574,6 +590,9 @@ resource "aws_lambda_function" "start_index_generation" {
       # Default DB snapshot pin (biggest re-run lever). Empty = live NCBI (current behavior);
       # set per-environment to skip the ~7.4h fetch. See variable for the expected layout.
       DEFAULT_DB_SNAPSHOT_PREFIX = var.index_gen_default_db_snapshot_prefix
+      # Default refresh_scope when the run event does not set one. "full" = rebuild every DB
+      # (current behavior); a scoped value makes whole-artifact reuse the default for re-runs.
+      DEFAULT_REFRESH_SCOPE = var.index_gen_default_refresh_scope
     }
   }
 }
