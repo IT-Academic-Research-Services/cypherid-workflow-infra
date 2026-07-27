@@ -205,6 +205,35 @@ variable "use_graviton" {
   description = "Run index-generation Batch stages on Graviton3 (arm64). Default true; flip to false to fall back to Track A x86 per-stage families."
 }
 
+variable "index_gen_default_db_snapshot_prefix" {
+  type        = string
+  default     = ""
+  description = <<-EOT
+    Default DB snapshot pin for start_index_generation. An S3 key prefix (or full s3:// URI)
+    holding the pinned raw db fastas (<nt_database_type>.fsa.gz, nr.fsa.gz) and the five
+    DownloadTaxonomy source files. When set, a normal run reads these instead of fetching from
+    NCBI (skips the ~7.4h download); compress + index still rebuild from the snapshot. Empty
+    (the default) preserves live-NCBI behavior, so an environment is unchanged until its prefix
+    is set. An explicit live_ncbi_refresh=true on the run event forces the live path regardless.
+  EOT
+}
+
+variable "index_gen_default_refresh_scope" {
+  type        = string
+  default     = "full"
+  description = <<-EOT
+    Default refresh_scope for start_index_generation when the run event does not set one.
+    "full" (the default) rebuilds every DB. Set to "nt_only"/"nr_only"/"lineage_only" to make
+    whole-artifact reuse the default for cheap re-runs (an out-of-scope DB reuses the prior
+    run's compressed fasta and skips compression). dev stays "full" until this is set. An
+    explicit event refresh_scope always wins; live_ncbi_refresh=true forces "full".
+  EOT
+  validation {
+    condition     = contains(["full", "nt_only", "nr_only", "lineage_only"], var.index_gen_default_refresh_scope)
+    error_message = "index_gen_default_refresh_scope must be one of: full, nt_only, nr_only, lineage_only."
+  }
+}
+
 data "aws_ssm_parameter" "idseq_batch_ami" {
   # NOTE: the mock-aws/aws conditional is because moto errors on creating ssm parameters that begin with aws or ssm.
   #
@@ -558,6 +587,12 @@ resource "aws_lambda_function" "start_index_generation" {
       INDEX_EC2_MEMORY    = "250000"  # index build on the on-demand fallback
       BUCKET              = data.aws_s3_bucket.public-references.bucket
       S3_WORKFLOWS_BUCKET = aws_s3_bucket.workflows.bucket
+      # Default DB snapshot pin (biggest re-run lever). Empty = live NCBI (current behavior);
+      # set per-environment to skip the ~7.4h fetch. See variable for the expected layout.
+      DEFAULT_DB_SNAPSHOT_PREFIX = var.index_gen_default_db_snapshot_prefix
+      # Default refresh_scope when the run event does not set one. "full" = rebuild every DB
+      # (current behavior); a scoped value makes whole-artifact reuse the default for re-runs.
+      DEFAULT_REFRESH_SCOPE = var.index_gen_default_refresh_scope
     }
   }
 }

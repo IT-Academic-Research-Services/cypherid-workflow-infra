@@ -118,8 +118,17 @@ def start_index_generation(event, *args):
     provided_nt = overrides.get("provided_nt")
     nt_database_type = overrides.get("nt_database_type", "nt")
 
-    # Lever 4 (802) refresh_scope: which lanes do real work this run.
-    refresh_scope = overrides.get("refresh_scope", "full")
+    # Annual full-refresh gate: an explicit live NCBI refresh both fetches live AND rebuilds
+    # everything, so it forces refresh_scope=full (never an artifact-reuse skip).
+    live_ncbi_refresh = bool(overrides.get("live_ncbi_refresh", False))
+
+    # Lever 4 (802) refresh_scope: which lanes do real work this run. The default is env-gated
+    # (DEFAULT_REFRESH_SCOPE, default "full") so an environment can make whole-artifact reuse the
+    # default for cheap re-runs without a code change -- dev stays "full" until its env var is
+    # set. An explicit event refresh_scope always wins; live_ncbi_refresh forces "full".
+    refresh_scope = overrides.get("refresh_scope") or os.environ.get("DEFAULT_REFRESH_SCOPE", "full")
+    if live_ncbi_refresh:
+        refresh_scope = "full"
     valid_scopes = ("full", "nt_only", "nr_only", "lineage_only")
     if refresh_scope not in valid_scopes:
         raise ValueError(
@@ -131,6 +140,21 @@ def start_index_generation(event, *args):
     # Lever 4 (802) taxonomy snapshot pin: an S3 key prefix (or full s3:// URI) holding a
     # held taxonomy snapshot. When unset the taxonomy lane defaults to live NCBI FTP.
     taxonomy_snapshot_prefix = overrides.get("taxonomy_snapshot_prefix")
+
+    # Default DB snapshot pin (biggest re-run lever). Unless this run is an explicit live-NCBI
+    # refresh (the "annual full refresh" gate) or the caller passed explicit
+    # provided_*/taxonomy_snapshot_prefix, point the download + taxonomy lanes at a pinned S3
+    # snapshot so a normal run SKIPS the ~7.4h NCBI fetch (compress + index still rebuild from
+    # the snapshot fasta). The snapshot prefix is expected to hold the raw db fastas
+    # (<nt_database_type>.fsa.gz, nr.fsa.gz) and the five taxonomy files the DownloadTaxonomy
+    # WDL names. An EMPTY DEFAULT_DB_SNAPSHOT_PREFIX (the default) preserves live-NCBI behavior,
+    # so an environment is unchanged until its prefix is set -- dev stays on live NCBI until
+    # explicitly opted in. Set live_ncbi_refresh=true on the event to force the live path (and
+    # re-pin the snapshot out of band); that is the deliberate, expensive annual refresh.
+    default_snapshot_prefix = os.environ.get("DEFAULT_DB_SNAPSHOT_PREFIX", "").strip()
+    use_default_snapshot = bool(default_snapshot_prefix) and not live_ncbi_refresh
+    if use_default_snapshot and not taxonomy_snapshot_prefix:
+        taxonomy_snapshot_prefix = default_snapshot_prefix
 
     sfn = boto3.client("stepfunctions")
     s3 = boto3.client("s3")
@@ -179,7 +203,13 @@ def start_index_generation(event, *args):
             ):
                 previous_nr_compressed = key
 
-    index_name = event["time"][:10]
+    # The output directory name under ncbi-indexes-<env>/. Defaults to the run date (a dated
+    # prefix, which the prior-run reuse discovery scans). An explicit index_name override lets a
+    # one-off run write to a NON-dated, isolated prefix (e.g. an optimized-version validation run
+    # whose output must stay invisible to normal runs' reuse discovery and must never be
+    # registered as a dev index). The override flows through to output_prefix + stage_io_map, so
+    # every stage output lands under it.
+    index_name = overrides.get("index_name") or event["time"][:10]
     docker_image_id = f"{aws_account_id}.dkr.ecr.{aws_region}.amazonaws.com/index-generation:{version}"
     output_prefix = f"s3://{bucket}/ncbi-indexes-{deployment_environment}/{index_name}/"
 
@@ -193,13 +223,17 @@ def start_index_generation(event, *args):
     stage_io_map_key = f"ncbi-indexes-{deployment_environment}/{index_name}/stage_io_map.json"
     s3.put_object(Bucket=bucket, Key=stage_io_map_key, Body=json.dumps(STAGES_IO_MAP).encode())
 
-    def snapshot_uri(name):
-        """Resolve a taxonomy snapshot file: `taxonomy_snapshot_prefix` may be a full s3://
-        URI or a key prefix under the references bucket."""
-        prefix = taxonomy_snapshot_prefix.rstrip("/")
+    def snapshot_file_uri(prefix, name):
+        """Resolve a file under a snapshot prefix that may be a full s3:// URI or a key prefix
+        under the references bucket."""
+        prefix = prefix.rstrip("/")
         if prefix.startswith("s3://"):
             return f"{prefix}/{name}"
         return s3_uri(f"{prefix}/{name}")
+
+    def snapshot_uri(name):
+        """Resolve a taxonomy snapshot file under `taxonomy_snapshot_prefix`."""
+        return snapshot_file_uri(taxonomy_snapshot_prefix, name)
 
     # Per-stage inputs: ONLY each sub-WDL's declared workflow inputs. The File hand-offs are
     # injected at runtime via STAGES_IO_MAP, so they are omitted here.
@@ -260,6 +294,19 @@ def start_index_generation(event, *args):
     if not nr_in_scope and not provided_nr and previous_nr_compressed:
         download_nr_input["provided_nr"] = s3_uri(previous_nr_compressed)
         compress_nr_input["skip_protein_compression"] = True
+
+    # Default DB snapshot: for any DB lane NOT already pointed at an explicit override or a
+    # reused compressed artifact, read its raw fasta from the pinned snapshot instead of NCBI.
+    # This skips the fetch while still compressing + indexing from the snapshot fasta, so it is
+    # the safe default for a normal (non-annual) run. Precedence: explicit provided_* > scoped
+    # compressed reuse > default snapshot > live NCBI. Snapshot filenames mirror each lane's
+    # extracted db (<nt_database_type>.fsa.gz / nr.fsa.gz); provided_* accepts .gz and unzips.
+    if use_default_snapshot and "provided_nt" not in download_nt_input:
+        download_nt_input["provided_nt"] = snapshot_file_uri(
+            default_snapshot_prefix, f"{nt_database_type}.fsa.gz"
+        )
+    if use_default_snapshot and "provided_nr" not in download_nr_input:
+        download_nr_input["provided_nr"] = snapshot_file_uri(default_snapshot_prefix, "nr.fsa.gz")
 
     # Explicit compression-skip overrides take precedence over the refresh_scope default.
     if "skip_nuc_compression" in overrides:
