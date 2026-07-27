@@ -203,7 +203,13 @@ def start_index_generation(event, *args):
             ):
                 previous_nr_compressed = key
 
-    index_name = event["time"][:10]
+    # The output directory name under ncbi-indexes-<env>/. Defaults to the run date (a dated
+    # prefix, which the prior-run reuse discovery scans). An explicit index_name override lets a
+    # one-off run write to a NON-dated, isolated prefix (e.g. an optimized-version validation run
+    # whose output must stay invisible to normal runs' reuse discovery and must never be
+    # registered as a dev index). The override flows through to output_prefix + stage_io_map, so
+    # every stage output lands under it.
+    index_name = overrides.get("index_name") or event["time"][:10]
     docker_image_id = f"{aws_account_id}.dkr.ecr.{aws_region}.amazonaws.com/index-generation:{version}"
     output_prefix = f"s3://{bucket}/ncbi-indexes-{deployment_environment}/{index_name}/"
 

@@ -172,4 +172,14 @@ assert "skip_nuc_compression" not in inp["CompressNT"]
 os.environ.pop("DEFAULT_REFRESH_SCOPE", None)
 os.environ.pop("DEFAULT_DB_SNAPSHOT_PREFIX", None)
 
+# ==== index_name override (isolated non-dated output prefix) ====
+# default: dated prefix from the event time
+inp = run(None)
+assert captured["sfn_input"]["OutputPrefix"].endswith("/ncbi-indexes-dev/2026-07-23/"), \
+    captured["sfn_input"]["OutputPrefix"]
+# override: a non-dated isolated prefix (invisible to prior-run reuse discovery)
+run(None, {"index_name": "optimized-fanout-4bd5413"})
+assert captured["sfn_input"]["OutputPrefix"] == \
+    f"{_BASE}/ncbi-indexes-dev/optimized-fanout-4bd5413/", captured["sfn_input"]["OutputPrefix"]
+
 print("ALL SNAPSHOT ASSERTIONS PASSED")
