@@ -57,4 +57,4 @@ module "idseq" {
 output "idseq" {
   value = module.idseq
 }
-# plan-on-PR smoke test (transient; revert)
+# plan-on-PR smoke test (transient; revert)# re-trigger after summary fix
