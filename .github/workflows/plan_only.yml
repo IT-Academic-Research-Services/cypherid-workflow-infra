@@ -109,21 +109,27 @@ jobs:
           path: results
       - name: Generate Summary
         run: |
-          ls -al results/
-          ls -al results/*/
-          jq --slurp . results/*/*.json
+          # Locate the result JSON regardless of whether download-artifact landed it flat
+          # (results/result.json, the single-artifact-id case) or nested (results/<name>/*.json).
+          # The old `results/*/*.json` glob assumed nesting and hard-failed under `bash -e` on PRs.
+          mapfile -t RESULTS < <(find results -type f -name '*.json' 2>/dev/null)
+          if [ "${#RESULTS[@]}" -eq 0 ]; then
+            echo "No plan result JSON found under results/ (nothing to summarize)."
+            exit 0
+          fi
+          jq --slurp . "${RESULTS[@]}"
 
-          echo "|   | Total Changes |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| - | ------------- |" >> "$GITHUB_STEP_SUMMARY"
-          jq -n '{change_count: [inputs.change_count] | add}' results/*/*.json | jq -r '"|\(if .change_count == 0 then ":green_circle:" else ":yellow_circle:" end)|\(.change_count)|"'
-          # shellcheck disable=SC2129  # redirects interleaved with stdout-only echoes/jq; grouping would reorder or obscure output
-          jq -n '{change_count: [inputs.change_count] | add}' results/*/*.json | jq -r '"|\(if .change_count == 0 then ":green_circle:" else ":yellow_circle:" end)|\(.change_count)|"' >> "$GITHUB_STEP_SUMMARY"
-
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "<br/>" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "| Action | Address |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| ------ | ------- |" >> "$GITHUB_STEP_SUMMARY"
-          jq -r '.resource_changes[] | "|\(.action)|\(.address)|"' results/*/*.json
-          jq -r '.resource_changes[] | "|\(.action)|\(.address)|"' results/*/*.json >> "$GITHUB_STEP_SUMMARY"
+          total=$(jq -n '{change_count: [inputs.change_count] | add}' "${RESULTS[@]}" | jq -r '"|\(if .change_count == 0 then ":green_circle:" else ":yellow_circle:" end)|\(.change_count)|"')
+          changes=$(jq -r '.resource_changes[] | "|\(.action)|\(.address)|"' "${RESULTS[@]}")
+          {
+            echo "|   | Total Changes |"
+            echo "| - | ------------- |"
+            echo "$total"
+            echo ""
+            echo "<br/>"
+            echo ""
+            echo "| Action | Address |"
+            echo "| ------ | ------- |"
+            echo "$changes"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "$total"; echo "$changes"
