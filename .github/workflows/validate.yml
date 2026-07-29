@@ -1,6 +1,6 @@
 name: Terraform Validate
 
-# Thin caller of the SSOT reusable (thorvath-slower/seqtoid-ci-workflows) pinned @v1 — one definition,
+# Thin caller of the SSOT reusable (IT-Academic-Research-Services/seqtoid-ci-workflows) pinned @v1 — one definition,
 # updated once, used everywhere. This repo needs chalice lambda codegen + env sourcing before validate,
 # expressed via `prepare` + `validate_command`. Terraform version comes from .terraform-version.
 on:
@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   validate:
-    uses: thorvath-slower/seqtoid-ci-workflows/.github/workflows/terraform-ci.yml@v1
+    uses: IT-Academic-Research-Services/seqtoid-ci-workflows/.github/workflows/terraform-ci.yml@v1
     with:
       fmt_path: "."
       # codegen (runs after fmt, before validate) — chalice lambda packaging + test env
