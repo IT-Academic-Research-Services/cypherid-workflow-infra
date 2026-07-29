@@ -2,10 +2,20 @@ name: Plan only
 run-name: Plan only in env ${{ inputs.environment || github.base_ref || github.ref_name }} branch ${{ github.base_ref || github.ref_name }} by ${{ github.actor }}
 
 on:
-  # Planning assumes an AWS OIDC role (czid-<env>-gh-actions-plan) and reads
-  # the real S3 backend, so it can't run until GitHub Environments + OIDC roles
-  # exist (CZID-81 / CZID-26). Until then it is manual-only; the no-AWS
-  # validate.yml is the automatic push/PR gate.
+  # Planning assumes an AWS OIDC role (czid-<env>-gh-actions-plan) and reads the real S3 backend.
+  # The CZID-81/26 precondition (per-env OIDC trust + GitHub Environments) is now met, so an
+  # automatic dev plan-on-PR runs alongside manual dispatch: a PR touching infra runs a read-only
+  # dev plan routed through the all-branches `dev-plan` environment (the plan role denies the
+  # `:pull_request` OIDC sub) and reports change counts before merge. The no-AWS validate.yml
+  # remains the fmt/validate gate.
+  pull_request:
+    paths:
+      - '**.tf'
+      - '.terraform.lock.hcl'
+      - 'lambdas/**'
+      - 'glue_jobs/**'
+      - 'environment*'
+      - 'Makefile'
   workflow_dispatch:
     inputs:
       environment:
@@ -49,7 +59,11 @@ jobs:
           echo "environment=${{ inputs.environment }}"
           echo "| Planning | Environment | Branch |" >> "$GITHUB_STEP_SUMMARY"
           echo "| ---------------- | ----------- | ------ |" >> "$GITHUB_STEP_SUMMARY"
-          if [[ -n "${{ inputs.environment }}" ]]; then
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # PR plan-on-review is dev-only (staging/prod stay gated); routed via dev-plan below.
+            echo "environment=dev" >> "$GITHUB_OUTPUT"
+            echo "| :green_circle: Enabled | dev (PR) | ${{ env.branch_name }} |" >> "$GITHUB_STEP_SUMMARY"
+          elif [[ -n "${{ inputs.environment }}" ]]; then
             echo "environment=${{ inputs.environment }}" >> "$GITHUB_OUTPUT"
             echo "| :green_circle: Enabled | ${{ inputs.environment }} | ${{ env.branch_name }} |" >> "$GITHUB_STEP_SUMMARY"
           elif [[ "${{ env.branch_name }}" == "development" ]]; then
@@ -74,6 +88,10 @@ jobs:
     uses: ./.github/workflows/plan_call.yml
     with:
       environment: ${{ needs.should-plan.outputs.environment }}
+      # On a dev PR from a feature branch, run under the all-branches dev-plan environment (the
+      # `dev` env's main-only deploy-branch policy would block the plan); on main/dispatch, empty
+      # -> plan_call falls back to the env's own GitHub Environment. staging/prod unaffected.
+      github_environment: ${{ (needs.should-plan.outputs.environment == 'dev' && github.ref_name != 'main') && 'dev-plan' || '' }}
       targets: ${{ inputs.targets }}
     secrets: inherit
 

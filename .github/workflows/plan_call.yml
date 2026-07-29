@@ -7,6 +7,14 @@ on:
         description: Both Github Environment and AWS Environment
         type: string
         required: true
+      github_environment:
+        description: >-
+          GitHub Environment to run under (overrides `environment` for the job's environment: key
+          only; the AWS env name still comes from `environment`). Used to route dev PR plans through
+          the all-branches `dev-plan` environment so the feature-branch gate doesn't block them.
+        type: string
+        required: false
+        default: ''
       targets:
         description: >-
           Optional space-separated terraform resource addresses. When set, the plan is limited to
@@ -29,7 +37,10 @@ env:
 jobs:
   plan:
     name: Plan
-    environment: ${{ inputs.environment }}
+    # github_environment (when set) overrides only the GitHub Environment the job runs under, so the
+    # OIDC sub becomes `...:environment:dev-plan` for PR plans (the plan role denies `:pull_request`).
+    # The AWS env name (role, profile, `source environment.<env>`) still comes from inputs.environment.
+    environment: ${{ inputs.github_environment != '' && inputs.github_environment || inputs.environment }}
     runs-on: ubuntu-latest
     env:
       AWS_REGION: us-west-2
