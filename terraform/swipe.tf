@@ -5,7 +5,25 @@ module "swipe" {
   # (merge_parallel_outputs) that lets the Parallel per-DB Download state merge its
   # outputs -- required for the NT/NR fan-out SFN. The fork adds one new required input
   # (restricted_files), supplied below.
-  source = "github.com/IT-Academic-Research-Services/swipe?ref=v1.4.9-ucsf.4"
+  #
+  # This ref is load-bearing for the CONTAINER IMAGE as well as the code. The module
+  # renders the Batch image reference from its own `version` file:
+  #
+  #   batch_job_docker_image = "<account>.dkr.ecr.us-west-2.amazonaws.com/swipe:${chomp(version)}"
+  #
+  # At ref ucsf.4 that file still said `v1.4.9-ucsf.3` -- a tag that has NEVER existed in
+  # the dev account. The -ucsf.x images were only ever pushed to the old shared registry
+  # account 941377154785 and were not migrated when dev was isolated, so every SWIPE
+  # container died at CannotPullImageManifestError and every user workflow failed. Moving
+  # to ucsf.5 is what repoints idseq-swipe-<env>-main at a real image; there is no
+  # separate image field to edit in this repo.
+  #
+  # ucsf.5 also carries (a) a genuine multi-arch amd64+arm64 runner image, so one image
+  # serves both the x86_64 user-facing CEs and the arm64 index-generation CEs, and (b) the
+  # sfn-io-helper handle_failure fix that reports the real error instead of
+  # KeyError: 'Error'. Both ride this ref because the module is pinned whole -- the
+  # lambdas are not separately deployable.
+  source = "github.com/IT-Academic-Research-Services/swipe?ref=v1.4.9-ucsf.5"
   tags = {
     Name = "swipe"
   }
