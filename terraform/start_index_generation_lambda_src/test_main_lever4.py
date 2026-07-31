@@ -25,17 +25,40 @@ _PRIOR_KEYS = [
 ]
 
 
+# The nine fan-out sub-WDLs the SMP-1463 preflight requires under the versioned S3 prefix.
+_WDL_FILENAMES = [
+    "download-taxonomy.wdl", "download-nt.wdl", "download-nr.wdl",
+    "compress-nt.wdl", "compress-nr.wdl",
+    "index-nt.wdl", "index-nr.wdl", "index-taxonomy.wdl", "assemble.wdl",
+]
+
+
 class FakePaginator:
     def paginate(self, **kw):
         return [{"Contents": [{"Key": k} for k in _PRIOR_KEYS]}]
 
 
+class _ECRExceptions:
+    class ImageNotFoundException(Exception):
+        pass
+
+
 class FakeS3:
+    # Serves both the s3 and ecr clients (fake_boto3.client returns this for either).
+    exceptions = _ECRExceptions
+
     def get_paginator(self, name):
         return FakePaginator()
 
     def put_object(self, **kw):
         captured["put_objects"].append(kw)
+
+    def list_objects_v2(self, Bucket, Prefix, **kw):
+        # SMP-1463 preflight: report all nine sub-WDLs published under the versioned prefix.
+        return {"Contents": [{"Key": Prefix + fn} for fn in _WDL_FILENAMES]}
+
+    def describe_images(self, **kw):
+        return {"imageDetails": [{"imageTags": [kw["imageIds"][0]["imageTag"]]}]}
 
 
 class FakeSFN:

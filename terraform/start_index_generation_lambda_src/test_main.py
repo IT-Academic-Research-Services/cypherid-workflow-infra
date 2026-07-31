@@ -12,17 +12,40 @@ import types
 captured = {"sfn_input": None, "put_objects": []}
 
 
+# The nine fan-out sub-WDLs the SMP-1463 preflight requires under the versioned S3 prefix.
+_WDL_FILENAMES = [
+    "download-taxonomy.wdl", "download-nt.wdl", "download-nr.wdl",
+    "compress-nt.wdl", "compress-nr.wdl",
+    "index-nt.wdl", "index-nr.wdl", "index-taxonomy.wdl", "assemble.wdl",
+]
+
+
 class FakePaginator:
     def paginate(self, **kw):
         return [{"Contents": []}]  # no prior lineages / compressed dbs
 
 
+class _ECRExceptions:
+    class ImageNotFoundException(Exception):
+        pass
+
+
 class FakeS3:
+    # Serves both the s3 and ecr clients (fake_boto3.client returns this for either).
+    exceptions = _ECRExceptions
+
     def get_paginator(self, name):
         return FakePaginator()
 
     def put_object(self, **kw):
         captured["put_objects"].append(kw)
+
+    def list_objects_v2(self, Bucket, Prefix, **kw):
+        # SMP-1463 preflight: report all nine sub-WDLs published under the versioned prefix.
+        return {"Contents": [{"Key": Prefix + fn} for fn in _WDL_FILENAMES]}
+
+    def describe_images(self, **kw):
+        return {"imageDetails": [{"imageTags": [kw["imageIds"][0]["imageTag"]]}]}
 
 
 class FakeSFN:
@@ -113,5 +136,43 @@ assert d["DownloadEC2Memory"] == 14000
 assert d["CompressEC2Memory"] == 380000
 assert d["IndexSPOTMemory"] == 128000
 assert d["IndexEC2Memory"] == 250000
+
+# ---- SMP-1463 version SSOT: WDL prefix + ECR tag + exec name all derive from one version ----
+# The WDL prefix and the image tag are the same string in both the run input and the preflight,
+# so a run can never be started against a version whose artifacts the preflight did not verify.
+assert main.wdl_prefix("v2.4.8") == "index-generation-v2.4.8"
+assert main.build_image_id("491013321714", "us-west-2", "v2.4.8") == _image
+assert captured["exec_name"].startswith("index-generation-2026-07-21-")
+
+# ---- SMP-1463 preflight: fail closed when the pinned version's artifacts do not exist ----
+# This is the v2.4.4 dangling-pointer state the ticket was opened for -- the lambda must reject
+# it up front (naming the SSOT env var), not let StartExecution point at a missing artifact.
+
+
+class _Absent:
+    exceptions = _ECRExceptions
+
+    def list_objects_v2(self, Bucket, Prefix, **kw):
+        return {}  # no WDLs published under this prefix
+
+    def describe_images(self, **kw):
+        raise _ECRExceptions.ImageNotFoundException("not found")
+
+
+try:
+    main.preflight_artifacts_exist(
+        _Absent(), _Absent(), "wf-bucket", "491013321714", "us-west-2", "v9.9.9"
+    )
+    raise SystemExit("FAIL: preflight accepted a version with no artifacts")
+except RuntimeError as e:
+    msg = str(e)
+    assert "INDEX_GENERATION_WORKFLOW_VERSION" in msg, msg
+    assert "index-generation-v9.9.9/download-nr.wdl" in msg, msg
+    assert "index-generation:v9.9.9" in msg, msg
+
+# ---- preflight passes cleanly when every artifact exists (the FakeS3 happy path) ----
+main.preflight_artifacts_exist(
+    FakeS3(), FakeS3(), "wf-bucket", "491013321714", "us-west-2", "v2.4.8"
+)
 
 print("\nALL ASSERTIONS PASSED")
