@@ -1,0 +1,98 @@
+name: rollup-integration-to-main
+
+# Branching model: humans open PRs against `integration`; every merge to integration is promoted onto the
+# protected `main` branch by this workflow. main is a mirror that ONLY this automation advances -- always
+# through an auto-merge PR, never a direct push -- so main's required status checks are the real gate.
+#
+# Why an app token: IT-ARS forbids the default GITHUB_TOKEN from opening PRs, so the promotion PR must be
+# minted with the GH_ACTIONS_HELPER GitHub App token (the same mechanism seqtoid-web/cypherid-web-infra use).
+# A direct `git push` to main is what leaves seqtoid-ssot-infra's rollup failing (GH006), so we do not do it.
+#
+# One-time prereqs (see the repo's CI setup notes): repo setting "Allow auto-merge" ON; the GH_ACTIONS_HELPER
+# app installed with GH_ACTIONS_HELPER_APP_ID + GH_ACTIONS_HELPER_PK secrets; and the repo variables
+# TRUNK_ROLLUP_ENABLED=true (gates this job to the canonical repo) and CI_APP_ENABLED=true (mints the token).
+on:
+  push:
+    branches: [integration]
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Off-cycle promotion context (recorded on the PR)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: rollup-integration-to-main
+  cancel-in-progress: false
+
+jobs:
+  rollup:
+    if: ${{ vars.TRUNK_ROLLUP_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Is there anything to promote?
+        id: diff
+        run: |
+          set -euo pipefail
+          git fetch origin main integration
+          ahead=$(git rev-list --count origin/main..origin/integration)
+          echo "ahead=$ahead" >> "$GITHUB_OUTPUT"
+          if [ "$ahead" -eq 0 ]; then
+            echo "integration has nothing ahead of main -- nothing to promote."
+          else
+            echo "integration is $ahead commit(s) ahead of main."
+          fi
+
+      - name: Generate app token
+        id: app_token
+        if: ${{ steps.diff.outputs.ahead != '0' && vars.CI_APP_ENABLED == 'true' }}
+        uses: chanzuckerberg/github-app-token@365b1f2db827eb8f17288ec335b1a7e3c03ff683 # v1.1.4
+        with:
+          app_id: ${{ secrets.GH_ACTIONS_HELPER_APP_ID }}
+          private_key: ${{ secrets.GH_ACTIONS_HELPER_PK }}
+
+      - name: Open or reuse the promotion PR + enable auto-merge
+        if: steps.diff.outputs.ahead != '0'
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token || github.token }}
+          REASON: ${{ github.event.inputs.reason }}
+          TRIGGER: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          stamp=$(date -u +%Y-%m-%d)
+          title="Promote integration -> main (${stamp})"
+          body="Automated roll-up of the reviewed \`integration\` trunk onto \`main\`."$'\n'"Trigger: ${TRIGGER}."
+          if [ -n "${REASON}" ]; then
+            body="${body}"$'\n'"Reason: ${REASON}"
+          fi
+
+          existing=$(gh pr list --base main --head integration --state open --json number --jq '.[0].number // empty')
+          if [ -z "${existing}" ]; then
+            gh pr create --base main --head integration --title "${title}" --body "${body}"
+          else
+            echo "Reusing open promotion PR #${existing}."
+          fi
+
+          # Arm auto-merge; branch protection (required checks, 0 reviews) is the real gate, so GitHub merges
+          # once the PR's checks pass. Retry through the transient window right after PR creation where the
+          # checks are still "queued" and `gh pr merge --auto` can momentarily attempt an immediate merge and
+          # fail ("Required status check ... is queued") -- without this the rollup reds on any check latency.
+          for attempt in 1 2 3 4 5 6; do
+            if gh pr merge integration --auto --merge --subject "${title}"; then
+              echo "auto-merge armed (attempt ${attempt}); main updates when its required checks pass."
+              exit 0
+            fi
+            echo "auto-merge not yet accepted (attempt ${attempt}); checks likely still queued -- retrying in 20s."
+            sleep 20
+          done
+          echo "::error::could not arm auto-merge on the integration->main PR after retries."
+          exit 1
