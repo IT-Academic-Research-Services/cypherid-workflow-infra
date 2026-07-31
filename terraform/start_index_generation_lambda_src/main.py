@@ -42,6 +42,68 @@ STAGE_WDL_FILENAMES = {
     "Assemble": "assemble.wdl",
 }
 
+# ---------------------------------------------------------------------------
+# Version SSOT (SMP-1463 / platform-overhaul 843).
+#
+# The index-generation workflow version is pinned in exactly ONE place: the terraform lambda
+# env INDEX_GENERATION_WORKFLOW_VERSION. Everything the pipeline pins to that version is
+# DERIVED from it HERE, so the three coupled artifacts can never drift apart:
+#   * the S3 WDL prefix   s3://<workflows>/index-generation-<VER>/   (all 9 fan-out sub-WDLs)
+#   * the ECR image tag   <acct>.dkr.ecr.<region>.amazonaws.com/index-generation:<VER>
+#   * the lambda env var  INDEX_GENERATION_WORKFLOW_VERSION          (the SSOT itself)
+#
+# WORKFLOW_NAME is the single token shared by the ECR repository name and the S3 WDL prefix, so
+# those cannot drift from each other either. wdl_prefix() / build_image_id() are the ONLY
+# builders of those strings -- both the run input (wdl_uri / per-stage docker_image_id) and the
+# preflight below go through them, so a check and the value it guards can never disagree.
+WORKFLOW_NAME = "index-generation"
+
+
+def wdl_prefix(version):
+    """S3 key prefix (no bucket, no trailing slash) holding the fan-out sub-WDLs for `version`."""
+    return f"{WORKFLOW_NAME}-{version}"
+
+
+def build_image_id(aws_account_id, aws_region, version):
+    """Fully-qualified ECR image reference for `version` (single definition)."""
+    return f"{aws_account_id}.dkr.ecr.{aws_region}.amazonaws.com/{WORKFLOW_NAME}:{version}"
+
+
+def preflight_artifacts_exist(s3, ecr, workflows_bucket, aws_account_id, aws_region, version):
+    """Fail closed if the artifacts the pinned version points at do not exist.
+
+    The version SSOT (INDEX_GENERATION_WORKFLOW_VERSION) can name a version whose WDLs were
+    never published or whose image was never built -- exactly the v2.4.4 dangling-pointer state
+    SMP-1463 was opened for. Left unchecked, StartExecution succeeds and the run only dies deep
+    inside SWIPE with an opaque "object not found". Verify the S3 WDL prefix (all nine sub-WDLs)
+    and the ECR image tag up front so a misconfigured version is rejected before any execution
+    starts, with a message that names the SSOT env var.
+    """
+    missing = []
+
+    prefix = wdl_prefix(version)
+    resp = s3.list_objects_v2(Bucket=workflows_bucket, Prefix=f"{prefix}/")
+    present = {obj["Key"] for obj in resp.get("Contents", [])}
+    for filename in sorted(STAGE_WDL_FILENAMES.values()):
+        key = f"{prefix}/{filename}"
+        if key not in present:
+            missing.append(f"s3://{workflows_bucket}/{key}")
+
+    image = build_image_id(aws_account_id, aws_region, version)
+    try:
+        ecr.describe_images(repositoryName=WORKFLOW_NAME, imageIds=[{"imageTag": version}])
+    except ecr.exceptions.ImageNotFoundException:
+        missing.append(image)
+
+    if missing:
+        raise RuntimeError(
+            f"index-generation version {version!r} (INDEX_GENERATION_WORKFLOW_VERSION) points "
+            "at artifacts that do not exist; publish the WDLs and build/push the image for this "
+            "version, or pin a version whose artifacts exist, before invoking. Missing: "
+            + ", ".join(missing)
+        )
+
+
 # DAG output->input handoff map consumed by the io-helper. For each stage,
 # `{ <this stage's declared File input>: <accumulated output name to resolve it from> }`.
 # Sources are resolved from the run's accumulated Result (union of every completed stage's
@@ -128,6 +190,13 @@ def start_index_generation(event, *args):
 
     sfn = boto3.client("stepfunctions")
     s3 = boto3.client("s3")
+    ecr = boto3.client("ecr")
+
+    # SMP-1463: reject a version whose WDL prefix or image was never published BEFORE any
+    # StartExecution, so an invoke can never point at a missing artifact (the v2.4.4 state).
+    preflight_artifacts_exist(
+        s3, ecr, workflows_bucket, aws_account_id, aws_region, version
+    )
 
     # Discover the most recent prior run's artifacts. Used for (a) the taxonomy lineage
     # incremental build and (b) the Lever 4 refresh_scope reuse path, where an out-of-scope DB
@@ -174,11 +243,11 @@ def start_index_generation(event, *args):
                 previous_nr_compressed = key
 
     index_name = event["time"][:10]
-    docker_image_id = f"{aws_account_id}.dkr.ecr.{aws_region}.amazonaws.com/index-generation:{version}"
+    docker_image_id = build_image_id(aws_account_id, aws_region, version)
     output_prefix = f"s3://{bucket}/ncbi-indexes-{deployment_environment}/{index_name}/"
 
     def wdl_uri(stage):
-        return f"s3://{workflows_bucket}/index-generation-{version}/{STAGE_WDL_FILENAMES[stage]}"
+        return f"s3://{workflows_bucket}/{wdl_prefix(version)}/{STAGE_WDL_FILENAMES[stage]}"
 
     def s3_uri(key):
         return f"s3://{bucket}/{key}"
@@ -290,7 +359,7 @@ def start_index_generation(event, *args):
     }
     sfn.start_execution(
         stateMachineArn=state_machine_arn,
-        name=f"index-generation-{index_name}-{uuid4()}",
+        name=f"{WORKFLOW_NAME}-{index_name}-{uuid4()}",
         input=json.dumps(input_dict),
     )
 
