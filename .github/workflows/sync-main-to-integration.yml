@@ -1,37 +1,28 @@
-name: Sync main -> integration
+name: sync-main-to-integration
 
-# Keeps `integration` from silently rotting behind `main`.
+# Safety net for the rollup model: main should only ever advance via rollup-integration-to-main. If anything
+# lands on main DIRECTLY (a hotfix, an upstream sync), integration falls behind and future rollups stall on
+# the ancestor check. On any push to main this brings integration back up: a lossless fast-forward when
+# integration is strictly behind, otherwise an auto-merge PR that never drops integration's own commits.
+# No-op guards (identical trees / already-contains-main) stop it ping-ponging with the rollup.
 #
-# promote-integration-to-main rolls integration -> main, but NOTHING ever brought main back down to
-# integration. So every commit that reached main WITHOUT going through integration -- a hotfix via
-# workflow_dispatch (an explicitly supported path, #289/#290), or infra/CI work merged direct -- left
-# integration permanently behind, and the gap only ever grew. It was found 18 commits behind with zero
-# commits of its own. Consequences, all quiet:
-#   - a feature branched off main and PR'd into integration carries the whole backlog in its diff, and
-#     the preview sandbox then BUILDS that -- so the author is not reviewing their change in isolation;
-#   - a feature branched off integration is developed and tested against stale code;
-#   - roll-up conflicts accumulate the longer the drift persists.
-# Every roll-up merge commit also lands on main and not integration, so the drift restarts immediately
-# even in the happy path. Tracked in the platform-overhaul back-sync ticket (Forgejo 691).
-
+# One-time prereqs are the same as the rollup: GH_ACTIONS_HELPER app + secrets, and the repo variables
+# TRUNK_SYNC_ENABLED=true and CI_APP_ENABLED=true.
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-concurrency:
-  group: sync-main-to-integration
-  cancel-in-progress: false
-
 permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: sync-main-to-integration
+  cancel-in-progress: false
+
 jobs:
   sync:
-    # Do not run on forks of this repo. Gated on a repo VARIABLE rather than a hardcoded
-    # `github.repository == 'org/repo'` string: that pattern is what makes the trunk workflows
-    # silently no-op in the UCSF org (#692). Set TRUNK_SYNC_ENABLED=true on the canonical repo only.
     if: ${{ vars.TRUNK_SYNC_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     steps:
@@ -44,144 +35,78 @@ jobs:
           private_key: ${{ secrets.GH_ACTIONS_HELPER_PK }}
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ steps.app_token.outputs.token || secrets.GITOPS_TOKEN || github.token }}
+          token: ${{ steps.app_token.outputs.token || github.token }}
           persist-credentials: true
 
       - name: Sync integration up to main
         env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITOPS_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token || github.token }}
         run: |
           set -euo pipefail
-          git config user.name  "seqtoid-gitops"
-          git config user.email "gitops@seqtoid.local"
+          git config user.name  "seqtoid-rollup-bot"
+          git config user.email "seqtoid-rollup-bot@users.noreply.github.com"
           git fetch origin main integration
 
+          # Normal post-rollup state: integration already contains main -- this is the ping-pong guard.
           if git merge-base --is-ancestor origin/main origin/integration; then
             echo "integration already contains main -- nothing to do."
             exit 0
           fi
-
-          # NO-OP GUARD: main can be AHEAD of integration by commits that change no files -- most
-          # commonly the merge commit that promote-integration-to-main lands on main during the
-          # nightly promote round-trip. The trees are then identical, so there is nothing to sync;
-          # without this the fast-forward push gets rejected by branch protection and the fallback
-          # opens a PR with a 0-file diff that sits open until someone closes it. If the working
-          # trees match, stop here as a clean no-op rather than open (or leave) an empty PR.
+          # main can be ahead only by no-op merge commits (identical trees) -- stop rather than open an empty PR.
           if git diff --quiet origin/main origin/integration; then
             echo "main and integration have identical trees -- nothing to sync (no-op)."
             exit 0
           fi
-
-          # Lossless fast-forward: integration has NO commits of its own, so it can simply advance.
+          # integration strictly behind main -> lossless fast-forward (no commits of its own to lose).
           if git merge-base --is-ancestor origin/integration origin/main; then
             echo "integration is strictly behind main -- fast-forwarding."
             if git push origin "origin/main:integration"; then
               echo "integration fast-forwarded to $(git rev-parse --short origin/main)."
               exit 0
             fi
-            echo "::warning::fast-forward push was rejected (branch protection). Opening a PR instead."
+            echo "::warning::fast-forward push rejected (branch protection). Opening a PR instead."
           else
-            # DIVERGED: integration carries feature commits not yet rolled up, AND main carries commits
-            # integration lacks. A fast-forward would DROP the feature commits, so it must not be used.
             echo "integration has diverged from main -- opening a merge PR instead of forcing."
           fi
 
-          # Fallback that never loses work: propose the sync as a reviewable PR.
+          # Fallback that never loses work: propose the sync as an auto-merging PR.
           BRANCH="gitops/sync-integration-$(git rev-parse --short origin/main)"
           git checkout -B "$BRANCH" origin/integration
           if ! git merge --no-edit origin/main; then
             git merge --abort || true
             echo "::error::main -> integration does not merge cleanly. A human must reconcile it."
-            gh issue create \
-              --title "integration has drifted from main and no longer merges cleanly" \
-              --body "The automated main -> integration sync could not merge. \`integration\` must be reconciled by hand before the next roll-up, or the drift will keep growing. Tracked in the platform-overhaul back-sync ticket (Forgejo 691)." \
-              || true
             exit 1
           fi
-          # Belt-and-suspenders: never open an EMPTY PR. If the merged (local) branch has no file
-          # diff against integration -- e.g. it only pulled in no-op merge commits -- there is
-          # nothing to review, so stop before pushing the branch or opening a PR. The early
-          # tree-identity guard above catches the common case; this covers the diverged path too.
           if git diff --quiet origin/integration "$BRANCH"; then
             echo "synced branch has no file changes vs integration -- skipping PR (no-op)."
             exit 0
           fi
-
-          # The branch name is derived from the main SHA, so a RERUN at the same SHA targets a branch
-          # that may already exist remotely from an earlier attempt. A plain push is then rejected
-          # non-fast-forward ("tip of your current branch is behind its remote counterpart"), set -e
-          # kills the job, and the sync silently never lands -- which is exactly how seven of these
-          # PRs stacked up. The branch is a disposable bot branch regenerated from
-          # (integration + main) every run and nobody develops on it, so overwriting it is correct;
-          # --force-with-lease keeps that honest by refusing if the remote moved unexpectedly.
+          # Bot branch regenerated from (integration + main) each run; overwriting is correct, lease keeps it honest.
           if ! git push --force-with-lease -u origin "$BRANCH"; then
-            echo "::error::could not push $BRANCH even with --force-with-lease. The remote branch moved unexpectedly; delete it and re-run."
+            echo "::error::could not push $BRANCH even with --force-with-lease; delete it and re-run."
             exit 1
           fi
           gh pr create --base integration --head "$BRANCH" \
             --title "sync: bring integration up to main" \
-            --body "Automated back-sync. integration was behind main; without this it keeps drifting and every feature PR into integration carries the backlog in its diff. Tracked in the platform-overhaul back-sync ticket (Forgejo 691)." \
+            --body "Automated back-sync: integration was behind main. The content is already on main (reviewed on the way in or an approved direct-to-main change), so no fresh review is required." \
             || echo "a sync PR may already be open"
 
-          # Self-complete the back-sync so these PRs CONVERGE instead of piling up behind the
-          # integration 1-review rule. The synced content is by definition ALREADY on main --
-          # reviewed on the way in, or an approved direct-to-main hotfix -- so it does not need a
-          # fresh review on the way back down. Merge it with the app token (admin), exactly how
-          # gitops-advance-dev merges its own PRs. This is what makes "keeps integration from
-          # drifting" actually hold: without it the opened PR sat review-gated forever, which is
-          # the very drift this workflow exists to prevent. Falls back to auto-merge.
-          #
-          # THIS STEP MUST FAIL THE JOB IF IT CANNOT MERGE. It previously ended in a bare
-          # `echo "::warning::"`, which leaves the job GREEN. That hid a total failure of the
-          # self-merge: the app token has no review bypass on `integration`, so every --admin
-          # attempt came back
-          #     GraphQL: At least 1 approving review is required by reviewers with write access.
-          # and every --auto attempt after it also failed. The job reported success each time while
-          # converging nothing, and four sync PRs stacked up unnoticed -- the exact pileup this
-          # self-merge was added to prevent. A back-sync that did not sync is a FAILURE and has to
-          # be red, because the damage (integration drifting behind main) is invisible otherwise.
-          #
-          # The durable fix is to let this workflow's app bypass the review rule on the
-          # gitops/sync-integration-* branch pattern, so the merge succeeds outright. Until that
-          # ruleset change is in place this job will go red and a human approves the PR by hand --
-          # which is the correct, honest behaviour, not a regression.
+          # Self-complete so back-sync PRs converge instead of piling up. A back-sync that did not sync is a
+          # FAILURE and must be red -- the drift (integration behind main) is invisible otherwise.
           PRNUM="$(gh pr list --head "$BRANCH" --base integration --state open --json number --jq '.[0].number // empty' || true)"
           if [ -z "$PRNUM" ]; then
-            # The PR was pushed and `gh pr create` ran, so one must exist. Finding none means the
-            # create failed for a reason its `|| echo` swallowed. Do not exit 0 on this path: that
-            # is the same silent-success hole in a different place.
-            echo "::error::pushed $BRANCH but no open sync PR into integration could be found. The PR was not created; integration is still behind main."
-            {
-              echo "### Back-sync FAILED"
-              echo "Pushed \`$BRANCH\` but no open sync PR into \`integration\` exists."
-              echo "\`integration\` is still behind \`main\`."
-            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::pushed $BRANCH but no open sync PR into integration exists; integration is still behind main."
             exit 1
           fi
-
           MERGE_LOG="$(mktemp)"
           if gh pr merge "$PRNUM" --merge --admin --delete-branch >"$MERGE_LOG" 2>&1 \
             || gh pr merge "$PRNUM" --merge --auto --delete-branch >>"$MERGE_LOG" 2>&1; then
             echo "sync PR #$PRNUM merged; integration is up to date with main."
           else
-            # Surface the real reason instead of a generic message. The GraphQL error text is what
-            # tells you whether this is the review rule, a failing required check, or something new.
-            echo "----- gh pr merge output -----"
             cat "$MERGE_LOG"
-            echo "------------------------------"
-            echo "::error::sync PR #$PRNUM could not be merged; integration is STILL behind main. See the merge output above for the reason."
-            {
-              echo "### Back-sync FAILED"
-              echo "Sync PR #$PRNUM was opened but could not be merged, so \`integration\` is **still behind \`main\`**."
-              echo ""
-              echo "Approve and merge that PR to converge, then re-run this workflow."
-              echo ""
-              echo '```'
-              cat "$MERGE_LOG"
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::sync PR #$PRNUM could not be merged; integration is STILL behind main. See output above."
             exit 1
           fi
