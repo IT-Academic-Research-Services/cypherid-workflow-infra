@@ -455,6 +455,25 @@ resource "aws_iam_role_policy" "start_index_generation_lambda" {
         Resource : "arn:aws:s3:::seqtoid-public-references/ncbi-indexes-${var.DEPLOYMENT_ENVIRONMENT}/*",
       },
       {
+        # SMP-1463 preflight: list the versioned WDL prefix on the workflows bucket to confirm
+        # all 9 fan-out sub-WDLs for the pinned INDEX_GENERATION_WORKFLOW_VERSION were published
+        # before StartExecution. Bucket-level ListBucket only (no object read needed).
+        Effect : "Allow",
+        Action : [
+          "s3:ListBucket",
+        ],
+        Resource : aws_s3_bucket.workflows.arn,
+      },
+      {
+        # SMP-1463 preflight: confirm the ECR image tag for the pinned version exists before
+        # StartExecution. DescribeImages is read-only and scoped to the index-generation repo.
+        Effect : "Allow",
+        Action : [
+          "ecr:DescribeImages",
+        ],
+        Resource : "arn:aws:ecr:us-west-2:${var.AWS_ACCOUNT_ID}:repository/index-generation",
+      },
+      {
         Effect : "Allow",
         Action : [
           "logs:CreateLogGroup",
@@ -504,7 +523,11 @@ resource "aws_lambda_function" "start_index_generation" {
       # index-generation:<VER>. Bump all three together when releasing a new index-gen version.
       # v2.5.2 -- the first index-generation release built from source by CI rather than by hand.
       # This one variable is the SSOT for BOTH the ECR image tag (index-generation:<version>) and the
-      # S3 WDL prefix (index-generation-<version>/), so both must exist before it is bumped. Both do:
+      # S3 WDL prefix (index-generation-<version>/), so both must exist before it is bumped. The
+      # start_index_generation lambda now enforces this at runtime (SMP-1463): a preflight verifies
+      # the WDL prefix (all 9 sub-WDLs) and the ECR tag exist and fails closed BEFORE StartExecution,
+      # so a bump to a version whose artifacts are missing is rejected instead of dying inside SWIPE.
+      # Both currently exist:
       #   ECR  index-generation:v2.5.2 -> sha256:2c98beb6f1eb36ad3f3458f99236827db8fa198a713bd844ddce4fae1ff29d88
       #        multi-arch (linux/amd64 + linux/arm64); the arm64 entry is what the Graviton compress
       #        nodes actually execute. Same digest as the CI build c5ffdf7 -- retagged, not rebuilt.
