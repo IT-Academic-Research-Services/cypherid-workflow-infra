@@ -34,12 +34,10 @@ module "swipe" {
 
   # Data-minimization (vendored fork -ucsf.2): the fork wires a lambda that deletes
   # restricted intermediate files (host/human-filtered reads, validated source fastqs)
-  # at the end of every Step Function run. We ADOPT the capability but ship it DORMANT:
-  # an empty list matches nothing, so nothing is deleted. Flip the per-env feature flag
-  # var.enable_swipe_restricted_file_deletion to activate it with the canonical
-  # UCSF/CZI patterns in local.swipe_restricted_files. Off by default so this migration
-  # changes no runtime behavior; enabling deletion becomes a deliberate one-line change.
-  restricted_files = var.enable_swipe_restricted_file_deletion ? local.swipe_restricted_files : []
+  # at the end of every Step Function run. LIVE in dev + staging (users test there) via
+  # local.swipe_restricted_deletion_envs below; every other env gets an empty list, so
+  # nothing is deleted. Enabling another env is a one-line edit to that list.
+  restricted_files = local.enable_swipe_restricted_file_deletion ? local.swipe_restricted_files : []
 
   # mocking parameters
   ami_ssm_parameter = var.DEPLOYMENT_ENVIRONMENT == "test" ? "/mock-aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id" : "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id"
@@ -296,13 +294,14 @@ resource "aws_vpc_security_group_egress_rule" "aegea-ecs-allow_dns_tcp_ipv4" {
 }
 
 # --- Restricted intermediate-file deletion (data minimization) -----------------------
-# The vendored swipe fork can delete restricted intermediate files at the end of each
-# Step Function run. We keep the capability deployed but OFF by default; flip this per
-# environment to turn it on. See module.swipe.restricted_files above.
-variable "enable_swipe_restricted_file_deletion" {
-  description = "When true, swipe deletes restricted intermediate files (host/human-filtered reads, source fastqs) at the end of each Step Function run, using local.swipe_restricted_files. Default false: the capability is deployed but dormant (deletes nothing) until deliberately enabled per environment."
-  type        = bool
-  default     = false
+# The vendored swipe fork deletes restricted intermediate files (host/human-filtered reads,
+# validated source fastqs) at the end of each Step Function run. LIVE in dev + staging so end
+# users can test; prod-preview / sandbox / prod stay dormant until deliberately added to the env
+# list below. Env-list idiom matches the rest of this repo (contains([...], var.DEPLOYMENT_ENVIRONMENT)).
+locals {
+  # Environments where restricted intermediate-file deletion is active. One-line edit to add/remove.
+  swipe_restricted_deletion_envs        = ["dev", "staging"]
+  enable_swipe_restricted_file_deletion = contains(local.swipe_restricted_deletion_envs, var.DEPLOYMENT_ENVIRONMENT)
 }
 
 locals {
