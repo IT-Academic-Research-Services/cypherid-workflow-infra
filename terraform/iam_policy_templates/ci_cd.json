@@ -39,8 +39,6 @@
         "arn:aws:s3:::tfstate-${AWS_ACCOUNT_ID}/*",
         "arn:aws:s3:::tfstate-${AWS_ACCOUNT_ID}-test",
         "arn:aws:s3:::tfstate-${AWS_ACCOUNT_ID}-test/*",
-        "arn:aws:s3:::idseq-staging-heatmap",
-        "arn:aws:s3:::idseq-staging-heatmap/*",
         "arn:aws:s3:::idseq-${DEPLOYMENT_ENVIRONMENT}-heatmap",
         "arn:aws:s3:::idseq-${DEPLOYMENT_ENVIRONMENT}-heatmap/*"
       ]
