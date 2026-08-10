@@ -28,7 +28,7 @@ The `concurrency` parameter indicates how many concurrent batches you want to ha
 
 The `skip` parameter is an array of numbers indicating how many `job_params` you want to skip for each batch. E.g. if the first number in the skip array is 5, the first batch will skip 5. An input file with a given `job_params` and `concurrency` runs deterministically (it will create the same batches each time). If there is a failure in one of the batches, it stops processing and waits for all other batches to complete. After all batches have completed, a report is logged including the number of successes in each batch. If any of the coroutines did not complete successfully, you will want to run again, but include the `skip` parameter in the input_file. You can compose the skip array by mapping the array of logged `batch_report` objects to the array of their `success_count` properties. 
 
-Once you have composed your JSON file, upload it to the `idseq-{env}-heatmap-batch-jobs/input-files` S3 folder with a `YYYY-MM-DD_{optional description}.json` name.
+Once you have composed your JSON file, upload it to the `idseq-{env}-heatmap-batch-jobs-{account-id}/input-files` S3 folder with a `YYYY-MM-DD_{optional description}.json` name. The bucket name carries the id of the account the environment lives in -- `aws sts get-caller-identity --profile {profile} --query Account --output text` prints it, and the make targets below derive the same suffix the same way.
 
 ### Starting a batch indexing job
 You will trigger the glue job from your local machine using the make targets provided in this folder.
@@ -49,3 +49,5 @@ You will trigger the glue job from your local machine using the make targets pro
 
 # Deployment of the Glue Job
 Since this is an admin utility, for simplicity's sake there is no CI/CD. You use the make targets provided in the Makefile to deploy from your local.
+
+Each target picks its AWS CLI profile from `PROFILE_{env}` at the top of the Makefile and then reads the account id back through that same profile to build the bucket name, so the credentials and the bucket can never name different accounts. Override a profile name without editing the file by passing it in, e.g. `make staging-deploy PROFILE_staging=my-staging-sso`. Note that `sandbox` maps to the dev profile on purpose: the sandbox environment lives in the dev AWS account, and it is the `idseq-sandbox-` name prefix that separates it from dev.
