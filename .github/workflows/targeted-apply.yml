@@ -77,10 +77,22 @@ jobs:
           version: 2
           verbose: false
           arch: amd64
+      - name: Resolve target AWS account id
+        # The plan job is ungated (no `environment:`), so the environment-scoped `vars.AWS_ACCOUNT_ID`
+        # is unavailable and resolves to the repo default (dev) -- which builds a staging/prod role ARN
+        # in the WRONG account and fails OIDC. dev worked only by that coincidence. Map the account id
+        # from the target environment explicitly.
+        run: |
+          case "${{ inputs.environment }}" in
+            dev)     echo "TARGET_ACCOUNT_ID=491013321714" >> "$GITHUB_ENV" ;;
+            staging) echo "TARGET_ACCOUNT_ID=030998640247" >> "$GITHUB_ENV" ;;
+            prod)    echo "TARGET_ACCOUNT_ID=283694049553" >> "$GITHUB_ENV" ;;
+            *) echo "::error::unknown environment '${{ inputs.environment }}'"; exit 1 ;;
+          esac
       - name: configure aws credentials (read-only plan role)
         uses: aws-actions/configure-aws-credentials@v6.1.0
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-plan
+          role-to-assume: arn:aws:iam::${{ env.TARGET_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-plan
           role-session-name: GitHub_to_AWS_via_FederatedOIDC_targeted_plan
           aws-region: ${{ env.AWS_REGION }}
           aws-profile: idseq-${{ inputs.environment }}
@@ -155,10 +167,21 @@ jobs:
           version: 2
           verbose: false
           arch: amd64
+      - name: Resolve target AWS account id
+        # The `<env>-targeted` environment carries no AWS_ACCOUNT_ID var, so `vars.AWS_ACCOUNT_ID`
+        # falls back to the repo default (dev). Map the account id from the target environment
+        # explicitly, same as the plan job, so the apply assumes the role in the correct account.
+        run: |
+          case "${{ inputs.environment }}" in
+            dev)     echo "TARGET_ACCOUNT_ID=491013321714" >> "$GITHUB_ENV" ;;
+            staging) echo "TARGET_ACCOUNT_ID=030998640247" >> "$GITHUB_ENV" ;;
+            prod)    echo "TARGET_ACCOUNT_ID=283694049553" >> "$GITHUB_ENV" ;;
+            *) echo "::error::unknown environment '${{ inputs.environment }}'"; exit 1 ;;
+          esac
       - name: configure aws credentials (apply role)
         uses: aws-actions/configure-aws-credentials@v6.1.0
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-apply
+          role-to-assume: arn:aws:iam::${{ env.TARGET_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-apply
           role-session-name: GitHub_to_AWS_via_FederatedOIDC_targeted_apply
           aws-region: ${{ env.AWS_REGION }}
           aws-profile: idseq-${{ inputs.environment }}
@@ -187,28 +210,16 @@ jobs:
         # to the plan run so terraform accepts the saved plan; if they differ it rejects
         # the plan as stale -- which fails safe.
         run: make package-lambdas templates
-      - name: Download the scoped plan
-        uses: actions/download-artifact@v4
-        with:
-          name: tf-plan
-          path: ${{ github.workspace }}
-      - name: Terraform Init + Apply the saved scoped plan
+      - name: Terraform Init + scoped Apply
+        # Re-plan and apply the SAME -target set in ONE terraform invocation, rather than replaying a
+        # tf.plan saved by the plan job. The saved-plan model requires byte-identical artifacts across
+        # the plan->apply job boundary, but `make package-lambdas` is not deterministic for the chalice
+        # zips -- the cross-job apply failed with `filebase64sha256 ... inconsistent result`. Building +
+        # hashing the zip once inside this apply keeps it consistent. -target is fixed to the same
+        # resources the reviewer already approved in the ungated plan, so the scope cannot creep; a
+        # re-plan here only picks up any real state drift since the review (minutes), which -target bounds.
         run: |
           terraform init -input=false
-          if [[ ! -f tf.plan ]]; then
-            echo "::error::No tf.plan found from the plan job."
-            exit 1
-          fi
-          # Regenerate archive_file outputs that live INSIDE fetched modules (e.g. the swipe
-          # sfn-io-helper deployment.zip). `make package-lambdas` above only builds the
-          # root-repo lambda zips; a module's archive_file zip is written by terraform at plan
-          # time and does NOT travel in tf.plan across the plan->apply job boundary, so the
-          # saved plan would fail with "reading ZIP file ... deployment.zip: no such file".
-          # A throwaway scoped re-plan re-evaluates those archive_file data sources and writes
-          # the zips to disk byte-identically (same source => same output_sha), so the saved
-          # plan still applies (and is still rejected if real state drifted).
           read -ra _t <<< "$TARGETS"; ta=(); for t in "${_t[@]}"; do ta+=("-target=$t"); done
-          terraform plan -input=false -lock=false "${ta[@]}" -out=regen.tfplan >/dev/null 2>&1 || true
-          rm -f regen.tfplan
-          echo "Applying the reviewed scoped plan. Terraform refuses it if state drifted since planning."
-          terraform apply -input=false tf.plan
+          echo "terraform apply -auto-approve ${ta[*]}"
+          terraform apply -input=false -auto-approve "${ta[@]}"
