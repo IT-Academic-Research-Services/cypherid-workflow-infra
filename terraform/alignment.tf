@@ -11,7 +11,12 @@ locals {
     #   but we should also enable high concurrency so we can run these
     #   experiments quickly
     "dev" : { "SPOT" : 9600, "EC2" : 9600 },
-    "staging" : { "SPOT" : 4800, "EC2" : 960 },
+    # staging spot ceiling is 4800/CE (SPOT-1 + SPOT-2 ~= 9600 combined). EC2 is the
+    # ON-DEMAND FALLBACK the escalation ladder uses when spot is reclaimed
+    # (batch_run_helpers.py: SPOT queue -> on failure -> EC2 queue). At 960 it throttled
+    # reclaim-wave recovery, so raise it to 2400 (~25% of the spot fleet can fall back
+    # without queueing). Requires On-Demand Standard vCPU quota (L-1216C47A) >= 2400+headroom.
+    "staging" : { "SPOT" : 4800, "EC2" : 2400 },
     "prod" : { "SPOT" : 9600, "EC2" : 9600 },
   }
 }
