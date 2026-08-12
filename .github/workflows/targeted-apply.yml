@@ -22,12 +22,13 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: Target environment (dev only for now).
+        description: Target environment.
         required: true
         default: dev
         type: choice
         options:
           - dev
+          - staging
       targets:
         description: >-
           REQUIRED. Space-separated terraform resource addresses to scope the apply to
