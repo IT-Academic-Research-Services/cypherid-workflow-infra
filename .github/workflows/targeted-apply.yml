@@ -77,10 +77,22 @@ jobs:
           version: 2
           verbose: false
           arch: amd64
+      - name: Resolve target AWS account id
+        # The plan job is ungated (no `environment:`), so the environment-scoped `vars.AWS_ACCOUNT_ID`
+        # is unavailable and resolves to the repo default (dev) -- which builds a staging/prod role ARN
+        # in the WRONG account and fails OIDC. dev worked only by that coincidence. Map the account id
+        # from the target environment explicitly.
+        run: |
+          case "${{ inputs.environment }}" in
+            dev)     echo "TARGET_ACCOUNT_ID=491013321714" >> "$GITHUB_ENV" ;;
+            staging) echo "TARGET_ACCOUNT_ID=030998640247" >> "$GITHUB_ENV" ;;
+            prod)    echo "TARGET_ACCOUNT_ID=283694049553" >> "$GITHUB_ENV" ;;
+            *) echo "::error::unknown environment '${{ inputs.environment }}'"; exit 1 ;;
+          esac
       - name: configure aws credentials (read-only plan role)
         uses: aws-actions/configure-aws-credentials@v6.1.0
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-plan
+          role-to-assume: arn:aws:iam::${{ env.TARGET_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-plan
           role-session-name: GitHub_to_AWS_via_FederatedOIDC_targeted_plan
           aws-region: ${{ env.AWS_REGION }}
           aws-profile: idseq-${{ inputs.environment }}
@@ -155,10 +167,21 @@ jobs:
           version: 2
           verbose: false
           arch: amd64
+      - name: Resolve target AWS account id
+        # The `<env>-targeted` environment carries no AWS_ACCOUNT_ID var, so `vars.AWS_ACCOUNT_ID`
+        # falls back to the repo default (dev). Map the account id from the target environment
+        # explicitly, same as the plan job, so the apply assumes the role in the correct account.
+        run: |
+          case "${{ inputs.environment }}" in
+            dev)     echo "TARGET_ACCOUNT_ID=491013321714" >> "$GITHUB_ENV" ;;
+            staging) echo "TARGET_ACCOUNT_ID=030998640247" >> "$GITHUB_ENV" ;;
+            prod)    echo "TARGET_ACCOUNT_ID=283694049553" >> "$GITHUB_ENV" ;;
+            *) echo "::error::unknown environment '${{ inputs.environment }}'"; exit 1 ;;
+          esac
       - name: configure aws credentials (apply role)
         uses: aws-actions/configure-aws-credentials@v6.1.0
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-apply
+          role-to-assume: arn:aws:iam::${{ env.TARGET_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-apply
           role-session-name: GitHub_to_AWS_via_FederatedOIDC_targeted_apply
           aws-region: ${{ env.AWS_REGION }}
           aws-profile: idseq-${{ inputs.environment }}
