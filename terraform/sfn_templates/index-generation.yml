@@ -417,6 +417,7 @@ States:
     Next: AssembleSucceeded
     Catch:
       - ErrorEquals: ["States.ALL"]
+        ResultPath: $.BatchJobError.AssembleReadOutput
         Next: AssembleFailed
   AssembleFailed:
     Type: Pass
