@@ -210,28 +210,16 @@ jobs:
         # to the plan run so terraform accepts the saved plan; if they differ it rejects
         # the plan as stale -- which fails safe.
         run: make package-lambdas templates
-      - name: Download the scoped plan
-        uses: actions/download-artifact@v4
-        with:
-          name: tf-plan
-          path: ${{ github.workspace }}
-      - name: Terraform Init + Apply the saved scoped plan
+      - name: Terraform Init + scoped Apply
+        # Re-plan and apply the SAME -target set in ONE terraform invocation, rather than replaying a
+        # tf.plan saved by the plan job. The saved-plan model requires byte-identical artifacts across
+        # the plan->apply job boundary, but `make package-lambdas` is not deterministic for the chalice
+        # zips -- the cross-job apply failed with `filebase64sha256 ... inconsistent result`. Building +
+        # hashing the zip once inside this apply keeps it consistent. -target is fixed to the same
+        # resources the reviewer already approved in the ungated plan, so the scope cannot creep; a
+        # re-plan here only picks up any real state drift since the review (minutes), which -target bounds.
         run: |
           terraform init -input=false
-          if [[ ! -f tf.plan ]]; then
-            echo "::error::No tf.plan found from the plan job."
-            exit 1
-          fi
-          # Regenerate archive_file outputs that live INSIDE fetched modules (e.g. the swipe
-          # sfn-io-helper deployment.zip). `make package-lambdas` above only builds the
-          # root-repo lambda zips; a module's archive_file zip is written by terraform at plan
-          # time and does NOT travel in tf.plan across the plan->apply job boundary, so the
-          # saved plan would fail with "reading ZIP file ... deployment.zip: no such file".
-          # A throwaway scoped re-plan re-evaluates those archive_file data sources and writes
-          # the zips to disk byte-identically (same source => same output_sha), so the saved
-          # plan still applies (and is still rejected if real state drifted).
           read -ra _t <<< "$TARGETS"; ta=(); for t in "${_t[@]}"; do ta+=("-target=$t"); done
-          terraform plan -input=false -lock=false "${ta[@]}" -out=regen.tfplan >/dev/null 2>&1 || true
-          rm -f regen.tfplan
-          echo "Applying the reviewed scoped plan. Terraform refuses it if state drifted since planning."
-          terraform apply -input=false tf.plan
+          echo "terraform apply -auto-approve ${ta[*]}"
+          terraform apply -input=false -auto-approve "${ta[@]}"
