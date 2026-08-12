@@ -13,13 +13,21 @@ DEPLOYMENT_ENVIRONMENT = os.environ["DEPLOYMENT_ENVIRONMENT"]
 if "AWS_CHALICE_CLI_MODE" not in os.environ and "LOCAL_MODE" not in os.environ:
     ssm = boto3.client("ssm")
 
+# The web app's SSM namespace. Modern envs (seqtoid-*) publish web params under WEB_SSM_PREFIX
+# (e.g. /seqtoid-staging-web) with UPPERCASE keys; fall back to the legacy /idseq-<env>-web
+# namespace only when WEB_SSM_PREFIX is not set. The password follows the same UPPERCASE
+# convention as the other web params -- it was `db_password` (lowercase), which does not exist in
+# the seqtoid namespace and made every heatmap indexing job fail with
+# KeyError: 'mysql_password'.
+WEB_SSM_PREFIX = os.environ.get("WEB_SSM_PREFIX", f"/idseq-{DEPLOYMENT_ENVIRONMENT}-web")
+
 # map each AWS parameter name to a more meaningful application parameter name
 aws_parameter_names_to_local_names = {
-    f"/idseq-{DEPLOYMENT_ENVIRONMENT}-web/RDS_ADDRESS": "mysql_host",
-    f"/idseq-{DEPLOYMENT_ENVIRONMENT}-web/DB_PORT": "mysql_port",
-    f"/idseq-{DEPLOYMENT_ENVIRONMENT}-web/DB_USERNAME": "mysql_username",
-    f"/idseq-{DEPLOYMENT_ENVIRONMENT}-web/db_password": "mysql_password",
-    f"/idseq-{DEPLOYMENT_ENVIRONMENT}-web/HEATMAP_ES_ADDRESS": "es_host",
+    f"{WEB_SSM_PREFIX}/RDS_ADDRESS": "mysql_host",
+    f"{WEB_SSM_PREFIX}/DB_PORT": "mysql_port",
+    f"{WEB_SSM_PREFIX}/DB_USERNAME": "mysql_username",
+    f"{WEB_SSM_PREFIX}/DB_PASSWORD": "mysql_password",
+    f"{WEB_SSM_PREFIX}/HEATMAP_ES_ADDRESS": "es_host",
 }
 
 
@@ -56,5 +64,10 @@ def get_parameters():
             aws_parameter_names_to_local_names[parameter["Name"]]: parameter["Value"]
             for parameter in response["Parameters"]
         }
-        aws_params["mysql_db"] = f"idseq_{DEPLOYMENT_ENVIRONMENT}"
-    return {**env_var_params, **aws_params}
+        # Only fall back to the legacy naming for the DB name if nothing else supplied it.
+        # The env var MYSQL_DB carries the web app's real database name (e.g. `idseq_staging`) and
+        # must win -- `idseq_{DEPLOYMENT_ENVIRONMENT}` would yield `idseq_seqtoid-staging`, a DB that
+        # does not exist. Per the docstring, environment variables take priority, so they are merged
+        # LAST (this also fixes the prior override where the legacy DB name clobbered MYSQL_DB).
+        aws_params.setdefault("mysql_db", f"idseq_{DEPLOYMENT_ENVIRONMENT}")
+    return {**aws_params, **env_var_params}
