@@ -192,7 +192,11 @@ module "swipe" {
 
   extra_env_vars = {
     DEPLOYMENT_ENVIRONMENT = var.DEPLOYMENT_ENVIRONMENT,
-
+    # short-read-mngs v8.3.16+ read the alignment fan-out sub-WDL bucket from this env var
+    # (os.environ.get("WDL_WORKFLOW_BUCKET", "idseq-workflows") in batch_run_helpers.py); without
+    # it they fall back to the upstream idseq-workflows bucket and the fan-out fails. Older ports
+    # hardcode/derive the bucket in-image and ignore this, so setting it here is safe fleet-wide.
+    WDL_WORKFLOW_BUCKET = aws_s3_bucket.workflows.bucket,
   }
 
   sqs_queues = {
