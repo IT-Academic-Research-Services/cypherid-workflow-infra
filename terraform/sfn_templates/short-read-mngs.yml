@@ -87,7 +87,7 @@ States:
     Next: HostFilterSucceeded
     Catch:
       - ErrorEquals: ["States.ALL"]
-        ResultPath: $.Failure
+        ResultPath: $.BatchJobError.HostFilterReadOutput
         Next: HostFilterFailed
   HostFilterFailed:
     Type: Pass
@@ -163,7 +163,7 @@ States:
     Next: NonHostAlignmentSucceeded
     Catch:
       - ErrorEquals: ["States.ALL"]
-        ResultPath: $.Failure
+        ResultPath: $.BatchJobError.NonHostAlignmentReadOutput
         Next: NonHostAlignmentFailed
   NonHostAlignmentFailed:
     Type: Pass
@@ -239,7 +239,7 @@ States:
     Next: PostprocessSucceeded
     Catch:
       - ErrorEquals: ["States.ALL"]
-        ResultPath: $.Failure
+        ResultPath: $.BatchJobError.PostprocessReadOutput
         Next: PostprocessFailed
   PostprocessFailed:
     Type: Pass
