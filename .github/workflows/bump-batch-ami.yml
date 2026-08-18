@@ -1,0 +1,188 @@
+name: bump-batch-ami
+
+# Deliberate, controlled advance of the pinned Batch ECS-optimized AMI ids (SMP-1745).
+#
+# The Batch compute environments pin image_id to a specific AMI (see the batch_ami_id_* variables
+# in terraform/index-generation.tf, terraform/alignment.tf and terraform/swipe.tf) so that AWS
+# publishing a new ECS-optimized AMI no longer force-replaces every CE on the next plan. The cost
+# of pinning is that the hosts never pick up a newer AMI on their own. This job closes that gap
+# WITHOUT reintroducing the churn: on a weekly cadence it reads the AWS-published latest arm64 and
+# x86_64 ECS-optimized AMIs from the public SSM parameters, rewrites the pinned defaults if they
+# have moved, and opens a REVIEWABLE PR. It never applies and never merges.
+#
+# Applying the resulting bump WILL force-replace the affected CEs (that is the point of moving the
+# pin), so the PR is meant to be applied in an idle maintenance window, not auto-merged.
+#
+# Scheduled workflows only run from the default branch, so this activates once merged to main. The
+# PR it opens targets `integration` (the feature -> integration -> main model). One-time prereqs
+# match the rollup/sync workflows: the GH_ACTIONS_HELPER app + secrets and CI_APP_ENABLED=true, and
+# a dev GitHub Environment whose OIDC identity can assume czid-dev-gh-actions-plan (read-only).
+
+on:
+  schedule:
+    # 09:17 UTC every Monday. Off the hour to avoid the top-of-hour scheduler stampede.
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bump-batch-ami
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-west-2
+  # Base branch the bump PR targets (feature -> integration -> main).
+  BASE_BRANCH: integration
+  ARM64_SSM_PARAM: /aws/service/ecs/optimized-ami/amazon-linux-2/arm64/recommended/image_id
+  X86_SSM_PARAM: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
+
+jobs:
+  bump:
+    name: Open AMI bump PR
+    runs-on: ubuntu-latest
+    # dev Environment supplies vars.AWS_ACCOUNT_ID and the OIDC subject the plan role accepts.
+    environment: dev
+    permissions:
+      id-token: write # assume the read-only plan role via OIDC
+      contents: write # push the bump branch
+      pull-requests: write # open the bump PR
+    steps:
+      - name: Checkout base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BASE_BRANCH }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install AWS CLI
+        uses: unfor19/install-aws-cli-action@f5b46b7f32cf5e7ebd652656c5036bf83dd1e60c # v1
+        with:
+          version: 2
+          arch: amd64
+
+      - name: Configure AWS credentials (read-only plan role)
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-dev-gh-actions-plan
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Read latest ECS-optimized AMIs
+        id: latest
+        run: |
+          set -euo pipefail
+
+          # Fail closed: a missing/garbled lookup must NOT open a PR that blanks a pin.
+          read_ami() {
+            local param="$1" val
+            val="$(aws ssm get-parameter --name "$param" --query 'Parameter.Value' --output text 2>/dev/null || true)"
+            case "$val" in
+              ami-[0-9a-f]*) printf '%s' "$val" ;;
+              *) echo "::error::SSM parameter '$param' returned an invalid AMI id: '$val'"; return 1 ;;
+            esac
+          }
+
+          ARM64="$(read_ami "$ARM64_SSM_PARAM")"
+          X86="$(read_ami "$X86_SSM_PARAM")"
+          echo "Latest arm64: $ARM64"
+          echo "Latest x86_64: $X86"
+          {
+            echo "arm64=$ARM64"
+            echo "x86=$X86"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Rewrite pinned defaults
+        id: rewrite
+        env:
+          ARM64: ${{ steps.latest.outputs.arm64 }}
+          X86: ${{ steps.latest.outputs.x86 }}
+        run: |
+          set -euo pipefail
+
+          X86_FILES=(terraform/index-generation.tf terraform/alignment.tf terraform/swipe.tf)
+
+          # Capture the old ids for the PR body BEFORE rewriting.
+          old_ids() {
+            local arch="$1"; shift
+            grep -hoE "\"ami-[0-9a-f]+\" *# smp-1745-ami:${arch}" "$@" 2>/dev/null \
+              | grep -oE 'ami-[0-9a-f]+' | sort -u | paste -sd, -
+          }
+          OLD_ARM64="$(old_ids arm64 terraform/index-generation.tf)"
+          OLD_X86="$(old_ids x86 "${X86_FILES[@]}")"
+
+          # Marker-anchored, in-place rewrite. The id is the only thing that changes; the trailing
+          # smp-1745-ami:<arch> marker is preserved so the pin stays bump-able.
+          sed -i -E "s|\"ami-[0-9a-f]+\"( *# smp-1745-ami:arm64)|\"${ARM64}\"\1|" terraform/index-generation.tf
+          for f in "${X86_FILES[@]}"; do
+            sed -i -E "s|\"ami-[0-9a-f]+\"( *# smp-1745-ami:x86)|\"${X86}\"\1|" "$f"
+          done
+
+          if git diff --quiet; then
+            echo "Pins already at the latest AMIs -- nothing to bump."
+            echo "changed=false" >>"$GITHUB_OUTPUT"
+          else
+            git --no-pager diff --stat
+            {
+              echo "changed=true"
+              echo "old_arm64=$OLD_ARM64"
+              echo "old_x86=$OLD_X86"
+            } >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate app token
+        id: app_token
+        if: ${{ steps.rewrite.outputs.changed == 'true' && vars.CI_APP_ENABLED == 'true' }}
+        uses: chanzuckerberg/github-app-token@365b1f2db827eb8f17288ec335b1a7e3c03ff683 # v1.1.4
+        with:
+          app_id: ${{ secrets.GH_ACTIONS_HELPER_APP_ID }}
+          private_key: ${{ secrets.GH_ACTIONS_HELPER_PK }}
+
+      - name: Open bump PR
+        if: ${{ steps.rewrite.outputs.changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token || github.token }}
+          ARM64: ${{ steps.latest.outputs.arm64 }}
+          X86: ${{ steps.latest.outputs.x86 }}
+          OLD_ARM64: ${{ steps.rewrite.outputs.old_arm64 }}
+          OLD_X86: ${{ steps.rewrite.outputs.old_x86 }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "seqtoid-ami-bump-bot"
+          git config user.email "seqtoid-ami-bump-bot@users.noreply.github.com"
+
+          # Deterministic branch name keyed on the target ids: re-runs update the same branch/PR
+          # instead of piling up, and a superseded bump gets its own branch.
+          BRANCH="automation/bump-batch-ami-${ARM64}-${X86}"
+
+          # Re-auth the remote with the token that will push (checkout used persist-credentials:false).
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          git checkout -B "$BRANCH"
+          git add terraform/index-generation.tf terraform/alignment.tf terraform/swipe.tf
+          git commit \
+            -m "chore(batch): bump pinned ECS-optimized AMIs (SMP-1745)" \
+            -m "arm64 ${OLD_ARM64:-unknown} -> ${ARM64}" \
+            -m "x86_64 ${OLD_X86:-unknown} -> ${X86}" \
+            -m "Automated by .github/workflows/bump-batch-ami.yml. Applying this force-replaces the affected Batch compute environments; merge and apply in an idle window."
+          git push --force-with-lease -u origin "$BRANCH"
+
+          BODY_FILE="$(mktemp)"
+          {
+            printf '%s\n\n' 'Automated Batch ECS-optimized AMI bump (SMP-1745).'
+            printf '%s\n' '| Architecture | Old pin | New (AWS latest) |'
+            printf '%s\n' '| --- | --- | --- |'
+            printf '| arm64 (index-generation) | %s | %s |\n' "${OLD_ARM64:-unknown}" "${ARM64}"
+            printf '| x86_64 (alignment + swipe + index-gen fallback) | %s | %s |\n\n' "${OLD_X86:-unknown}" "${X86}"
+            printf '%s\n' 'Applying this PR moves image_id on the affected compute environments and therefore FORCE-REPLACES them. Merge and apply during an idle maintenance window; do not auto-merge. If a bump is unwanted, close the PR -- the pins stay where they are.'
+            printf '\nSource: AWS SSM public parameters %s and %s\n' "$ARM64_SSM_PARAM" "$X86_SSM_PARAM"
+          } >"$BODY_FILE"
+
+          if gh pr view "$BRANCH" --json number --jq '.number' >/dev/null 2>&1; then
+            echo "PR already open for $BRANCH; branch updated in place."
+          else
+            gh pr create --base "$BASE_BRANCH" --head "$BRANCH" \
+              --title "chore(batch): bump pinned ECS-optimized AMIs (SMP-1745)" \
+              --body-file "$BODY_FILE"
+          fi
