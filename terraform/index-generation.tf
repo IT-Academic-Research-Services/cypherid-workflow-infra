@@ -1,6 +1,21 @@
 locals {
   service_name = "idseq-${var.DEPLOYMENT_ENVIRONMENT}-index-generation"
 
+  # ENVIRONMENT GATE (platform-overhaul): index-generation is COMPUTE that runs only where
+  # the reference index is BUILT. The maintainer decision is that the index is generated in
+  # dev and its data RESULT (the ncbi-indexes-<env> artifacts) is copied out to staging/prod;
+  # the index-generation compute infra (per-stage Batch CEs/queues/launch templates, the
+  # start_index_generation lambda + its role/log group, the arm64 job-def, the SFN template
+  # entry, and the reference-index-versioning SSM pointers) must NEVER exist on staging or
+  # prod. This one flag gates all of it: for_each maps collapse to {} and single resources to
+  # count=0 when it is false, so a staging/prod plan drops every index-generation resource.
+  #
+  # "test" is included alongside "dev" because the moto/localstack test env (test/mock.tf,
+  # DEPLOYMENT_ENVIRONMENT="test") exercises the index-generation paths end to end; excluding
+  # it would empty the maps and break the terraform test harness. dev and test therefore keep
+  # exactly the resources they have today (no plan churn); staging, prod and sandbox drop them.
+  index_generation_enabled = contains(["dev", "test"], var.DEPLOYMENT_ENVIRONMENT)
+
   # Per-stage boxes each format+mount a single right-sized gp3 scratch volume (Lever 1,
   # Track A) instead of the old 64 TB 4-volume RAID0 the monolith needed. One shared
   # user-data file drives all stage launch templates; its hash is bound into every stage
@@ -206,6 +221,12 @@ variable "use_graviton" {
 }
 
 data "aws_ssm_parameter" "idseq_batch_ami" {
+  # Gated with the rest of index-generation: only read where index-generation compute exists
+  # (dev/test). count=0 on staging/prod so the AMI lookup drops with everything else. Its only
+  # consumers are the per-stage launch templates / compute environments below, which are also
+  # empty off-dev, so the [0] index is only ever dereferenced when this is present.
+  count = local.index_generation_enabled ? 1 : 0
+
   # NOTE: the mock-aws/aws conditional is because moto errors on creating ssm parameters that begin with aws or ssm.
   #
   # Graviton (Lever 2): arm64 Batch hosts must boot an arm64 ECS-optimized AMI, so when
@@ -227,7 +248,11 @@ data "aws_ssm_parameter" "idseq_batch_ami" {
 # Roll a newer AMI deliberately with `terraform apply -replace` on the launch template + CE.
 
 data "aws_vpc" "webservice_vpc" {
-  count = var.DEPLOYMENT_ENVIRONMENT == "test" ? 0 : 1
+  # These lookups feed only the index-generation SG / compute environments, which now exist on
+  # dev alone. Original guard was test=0 (moto cannot resolve the tag-filtered VPC, so the SG
+  # falls back to aws_vpc.idseq there); narrowing to dev-only additionally drops the read from
+  # staging/prod/sandbox plans along with the rest of index-generation. dev unchanged (1).
+  count = var.DEPLOYMENT_ENVIRONMENT == "dev" ? 1 : 0
 
   tags = {
     service = "cloud-env"
@@ -236,7 +261,8 @@ data "aws_vpc" "webservice_vpc" {
 }
 
 data "aws_subnets" "webservice_subnets" {
-  count = var.DEPLOYMENT_ENVIRONMENT == "test" ? 0 : 1
+  # Dev-only, same rationale as data.aws_vpc.webservice_vpc above.
+  count = var.DEPLOYMENT_ENVIRONMENT == "dev" ? 1 : 0
 
   filter {
     name   = "tag:service"
@@ -262,6 +288,8 @@ resource "aws_security_group" "index_generation" {
   # VPC-ENDPOINTS-ARCHITECTURE-2026-06-29.md). Egress is narrowed off "-1"/all-ports to HTTPS + HTTP
   # + DNS, which removes arbitrary-port outbound and clears CKV_AWS_382; Trivy AWS-0104 (0.0.0.0/0
   # destination) is kept + baselined in .trivyignore with this justification.
+  count = local.index_generation_enabled ? 1 : 0
+
   name   = "index-generation-${var.DEPLOYMENT_ENVIRONMENT}"
   vpc_id = length(data.aws_vpc.webservice_vpc) > 0 ? data.aws_vpc.webservice_vpc[0].id : aws_vpc.idseq.id
   egress {
@@ -300,7 +328,9 @@ resource "aws_security_group" "index_generation" {
 # (AWS Batch pins the launch-template version at CE creation and cannot update it in place).
 resource "aws_launch_template" "index_generation" {
   # checkov:skip=CKV_AWS_341:hop_limit=2 is required for AWS Batch container workloads to reach IMDS (container→host→IMDS = 2 hops). IMDSv2 is still enforced via http_tokens=required. (CZID-57)
-  for_each = local.index_generation_stages
+  # Empty the map off-dev so the per-stage launch templates drop on staging/prod; dev/test keep
+  # the same instance keys (compress, download*, index*), so those envs see no plan change.
+  for_each = local.index_generation_enabled ? local.index_generation_stages : {}
 
   name      = "${local.service_name}-${each.key}-batch-${local.launch_template_user_data_hash}"
   user_data = filebase64(local.launch_template_user_data_file)
@@ -315,7 +345,7 @@ resource "aws_launch_template" "index_generation" {
   # needs to do so using the v2 endpoint.
   # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html
 
-  image_id = data.aws_ssm_parameter.idseq_batch_ami.value
+  image_id = data.aws_ssm_parameter.idseq_batch_ami[0].value
   metadata_options {
     http_endpoint               = "enabled"
     http_tokens                 = "required"
@@ -349,7 +379,8 @@ resource "aws_launch_template" "index_generation" {
 # params on a type = "EC2" CE is exactly the latent misconfig that made the old CE silently
 # run on-demand, so we only set them when the CE is genuinely SPOT.
 resource "aws_batch_compute_environment" "index_generation" {
-  for_each                        = local.index_generation_stages
+  # Empty off-dev; dev/test keep the same per-stage keys (no plan change there).
+  for_each                        = local.index_generation_enabled ? local.index_generation_stages : {}
   compute_environment_name_prefix = "${local.service_name}-${each.key}-"
 
   compute_resources {
@@ -363,11 +394,11 @@ resource "aws_batch_compute_environment" "index_generation" {
       Name = "${local.service_name}-${each.key}-batch"
     }
 
-    image_id           = data.aws_ssm_parameter.idseq_batch_ami.value
+    image_id           = data.aws_ssm_parameter.idseq_batch_ami[0].value
     min_vcpus          = 0
     desired_vcpus      = 0
     max_vcpus          = each.value.max_vcpus
-    security_group_ids = [aws_security_group.index_generation.id]
+    security_group_ids = [aws_security_group.index_generation[0].id]
 
     subnets = length(data.aws_subnets.webservice_subnets) > 0 ? data.aws_subnets.webservice_subnets[0].ids : [for subnet in aws_subnet.idseq : subnet.id]
 
@@ -414,7 +445,8 @@ resource "aws_batch_compute_environment" "index_generation" {
 # extra_template_vars wired in swipe.tf; the Index stage uses index_spot with index_ondemand
 # as its on-demand fallback.
 resource "aws_batch_job_queue" "index_generation" {
-  for_each = local.index_generation_stages
+  # Empty off-dev; dev/test keep the same per-stage keys (no plan change there).
+  for_each = local.index_generation_enabled ? local.index_generation_stages : {}
 
   name                 = "${local.service_name}-${each.key}"
   state                = "ENABLED"
@@ -423,6 +455,8 @@ resource "aws_batch_job_queue" "index_generation" {
 }
 
 data "archive_file" "lambda_archive" {
+  # Gated with the start_index_generation lambda it feeds: built on dev/test only.
+  count            = local.index_generation_enabled ? 1 : 0
   type             = "zip"
   source_dir       = "${path.module}/start_index_generation_lambda_src"
   output_file_mode = "0666"
@@ -430,6 +464,7 @@ data "archive_file" "lambda_archive" {
 }
 
 resource "aws_iam_role" "start_index_generation_lambda" {
+  count = local.index_generation_enabled ? 1 : 0
 
   name = "start_index_generation-lambda-${var.DEPLOYMENT_ENVIRONMENT}"
 
@@ -448,9 +483,10 @@ resource "aws_iam_role" "start_index_generation_lambda" {
 }
 
 resource "aws_iam_role_policy" "start_index_generation_lambda" {
+  count = local.index_generation_enabled ? 1 : 0
 
   name = "start_index_generation-lambda-${var.DEPLOYMENT_ENVIRONMENT}"
-  role = aws_iam_role.start_index_generation_lambda.id
+  role = aws_iam_role.start_index_generation_lambda[0].id
 
   policy = jsonencode({
     Version : "2012-10-17",
@@ -519,6 +555,7 @@ resource "aws_iam_role_policy" "start_index_generation_lambda" {
 # once (terraform import) before the first apply.
 resource "aws_cloudwatch_log_group" "start_index_generation" {
   #checkov:skip=CKV_AWS_338:90-day retention (var.lambda_log_retention_in_days) is the deliberate cost/policy choice for these lambda log groups; CKV_AWS_338 wants >=1 year. Logs are KMS-encrypted via the workflows CMK below (CZID-63).
+  count             = local.index_generation_enabled ? 1 : 0
   name              = "/aws/lambda/idseq-start_index_generation-${var.DEPLOYMENT_ENVIRONMENT}"
   retention_in_days = var.lambda_log_retention_in_days
   # Reuse the workflows customer-managed key (CZID-57). CloudWatch Logs usage of the key
@@ -527,15 +564,16 @@ resource "aws_cloudwatch_log_group" "start_index_generation" {
 }
 
 resource "aws_lambda_function" "start_index_generation" {
+  count            = local.index_generation_enabled ? 1 : 0
   function_name    = "idseq-start_index_generation-${var.DEPLOYMENT_ENVIRONMENT}"
   runtime          = "python3.12"
   handler          = "main.start_index_generation"
   memory_size      = 256
   timeout          = 600
-  source_code_hash = data.archive_file.lambda_archive.output_sha
-  filename         = data.archive_file.lambda_archive.output_path
+  source_code_hash = data.archive_file.lambda_archive[0].output_sha
+  filename         = data.archive_file.lambda_archive[0].output_path
 
-  role = aws_iam_role.start_index_generation_lambda.arn
+  role = aws_iam_role.start_index_generation_lambda[0].arn
 
   # Ensure the managed log group exists before the function can auto-create an implicit one.
   depends_on = [aws_cloudwatch_log_group.start_index_generation]
@@ -626,3 +664,44 @@ resource "aws_lambda_function" "start_index_generation" {
 //   target_id = "automated-index-generation"
 //   arn       = aws_lambda_function.start_index_generation.arn
 // }
+
+# ---------------------------------------------------------------------------
+# State moves for the dev-only gate (platform-overhaul).
+#
+# The single (non-for_each) index-generation resources above gained
+# `count = local.index_generation_enabled ? 1 : 0`, which changes their state
+# address from <addr> to <addr>[0]. These moved blocks tell terraform that is a
+# pure ADDRESS move, not a destroy/recreate, so the live dev (and test) resources
+# stay in place with zero create/destroy churn. Off-dev they are absent from state
+# entirely, and a moved block whose source is not in state is a harmless no-op.
+#
+# The per-stage for_each resources (launch templates, compute environments, job
+# queues) do NOT need a moved block: emptying the for_each map keeps the SAME
+# instance keys on dev/test and simply removes them off-dev. Data sources
+# (idseq_batch_ami, lambda_archive) also need none -- they are re-read each plan,
+# not create/destroy state.
+# ---------------------------------------------------------------------------
+moved {
+  from = aws_security_group.index_generation
+  to   = aws_security_group.index_generation[0]
+}
+
+moved {
+  from = aws_iam_role.start_index_generation_lambda
+  to   = aws_iam_role.start_index_generation_lambda[0]
+}
+
+moved {
+  from = aws_iam_role_policy.start_index_generation_lambda
+  to   = aws_iam_role_policy.start_index_generation_lambda[0]
+}
+
+moved {
+  from = aws_cloudwatch_log_group.start_index_generation
+  to   = aws_cloudwatch_log_group.start_index_generation[0]
+}
+
+moved {
+  from = aws_lambda_function.start_index_generation
+  to   = aws_lambda_function.start_index_generation[0]
+}

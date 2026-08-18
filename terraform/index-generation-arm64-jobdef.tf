@@ -24,6 +24,10 @@
 # multi-arch swipe image + module support (CZID-777).
 
 resource "aws_batch_job_definition" "index_generation_arm64" {
+  # Only the index-generation SFN uses this job-def, so it lives wherever index-generation
+  # compute lives (dev/test); count=0 drops it from staging/prod. See local.index_generation_enabled.
+  count = local.index_generation_enabled ? 1 : 0
+
   name = "idseq-swipe-${var.DEPLOYMENT_ENVIRONMENT}-index-generation-arm64"
   type = "container"
   tags = { Name = "swipe" }
@@ -42,4 +46,11 @@ resource "aws_batch_job_definition" "index_generation_arm64" {
   lifecycle {
     create_before_destroy = true
   }
+}
+
+# State move for the dev-only gate: this job-def gained count, so its address moves from
+# <addr> to <addr>[0] on dev/test. Pure address move, no destroy/recreate; a no-op off-dev.
+moved {
+  from = aws_batch_job_definition.index_generation_arm64
+  to   = aws_batch_job_definition.index_generation_arm64[0]
 }

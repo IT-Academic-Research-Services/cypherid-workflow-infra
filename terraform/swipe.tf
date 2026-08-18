@@ -96,37 +96,48 @@ module "swipe" {
   wdl_workflow_s3_prefix   = aws_s3_bucket.workflows.bucket
   batch_ec2_instance_types = var.DEPLOYMENT_ENVIRONMENT == "test" ? ["optimal"] : ["r5d"]
 
-  sfn_template_files = {
-    "short-read-mngs" : {
-      path                = "${path.module}/sfn_templates/short-read-mngs.yml",
-      extra_template_vars = {},
-    },
-    "index-generation" : {
-      path = "${path.module}/sfn_templates/index-generation.yml",
-      # Multi-stage index-generation (Lever 1, Track A): each phase routes to its own
-      # right-sized per-stage queue. The Index stage runs on the spot queue and falls back
-      # to the on-demand queue on a spot reclaim (see sfn_templates/index-generation.yml).
-      extra_template_vars = {
-        "index_generation_download_job_queue_arn" : aws_batch_job_queue.index_generation["download"].arn,
-        # Download split (799): per-database queues so nt/nr/taxonomy run concurrently on
-        # separate right-sized boxes. Wired here so the SFN template's Parallel Download
-        # branches can route to them (routing switch is 799 step 2). Additive: the single
-        # `download` arn above stays until that switch removes it.
-        "index_generation_download_taxonomy_job_queue_arn" : aws_batch_job_queue.index_generation["download_taxonomy"].arn,
-        "index_generation_download_nt_job_queue_arn" : aws_batch_job_queue.index_generation["download_nt"].arn,
-        "index_generation_download_nr_job_queue_arn" : aws_batch_job_queue.index_generation["download_nr"].arn,
-        "index_generation_compress_job_queue_arn" : aws_batch_job_queue.index_generation["compress"].arn,
-        "index_generation_index_spot_job_queue_arn" : aws_batch_job_queue.index_generation["index_spot"].arn,
-        "index_generation_index_on_demand_job_queue_arn" : aws_batch_job_queue.index_generation["index_ondemand"].arn,
-        # Graviton (Lever 2, CZID-776): override the shared amd64 swipe_main job-def with the
-        # dedicated arm64 job-def for index-generation only. swipe-sfn renders the template with
-        # merge({batch_job_definition_name = <swipe_main>...}, extra_template_vars), and merge's
-        # second arg wins, so this replaces batch_job_definition_name for THIS SFN alone. The
-        # arm64 CEs (r7g/m7g) can only exec the arm64 SWIPE runner; short-read-mngs is untouched.
-        "batch_job_definition_name" : aws_batch_job_definition.index_generation_arm64.name,
+  # short-read-mngs always deploys (every env runs it). The index-generation SFN is
+  # dev/test-only (local.index_generation_enabled): its template references the per-stage
+  # index-generation queues and the arm64 job-def, which do not exist off-dev, so the whole
+  # entry is merged in only where those exist. On staging/prod the swipe module renders just
+  # the short-read-mngs state machine; module.swipe.sfn_arns has no "index-generation" key
+  # there, which is safe because its only consumers (the start_index_generation lambda + role)
+  # are themselves gated off on those envs.
+  sfn_template_files = merge(
+    {
+      "short-read-mngs" : {
+        path                = "${path.module}/sfn_templates/short-read-mngs.yml",
+        extra_template_vars = {},
       },
     },
-  }
+    local.index_generation_enabled ? {
+      "index-generation" : {
+        path = "${path.module}/sfn_templates/index-generation.yml",
+        # Multi-stage index-generation (Lever 1, Track A): each phase routes to its own
+        # right-sized per-stage queue. The Index stage runs on the spot queue and falls back
+        # to the on-demand queue on a spot reclaim (see sfn_templates/index-generation.yml).
+        extra_template_vars = {
+          "index_generation_download_job_queue_arn" : aws_batch_job_queue.index_generation["download"].arn,
+          # Download split (799): per-database queues so nt/nr/taxonomy run concurrently on
+          # separate right-sized boxes. Wired here so the SFN template's Parallel Download
+          # branches can route to them (routing switch is 799 step 2). Additive: the single
+          # `download` arn above stays until that switch removes it.
+          "index_generation_download_taxonomy_job_queue_arn" : aws_batch_job_queue.index_generation["download_taxonomy"].arn,
+          "index_generation_download_nt_job_queue_arn" : aws_batch_job_queue.index_generation["download_nt"].arn,
+          "index_generation_download_nr_job_queue_arn" : aws_batch_job_queue.index_generation["download_nr"].arn,
+          "index_generation_compress_job_queue_arn" : aws_batch_job_queue.index_generation["compress"].arn,
+          "index_generation_index_spot_job_queue_arn" : aws_batch_job_queue.index_generation["index_spot"].arn,
+          "index_generation_index_on_demand_job_queue_arn" : aws_batch_job_queue.index_generation["index_ondemand"].arn,
+          # Graviton (Lever 2, CZID-776): override the shared amd64 swipe_main job-def with the
+          # dedicated arm64 job-def for index-generation only. swipe-sfn renders the template with
+          # merge({batch_job_definition_name = <swipe_main>...}, extra_template_vars), and merge's
+          # second arg wins, so this replaces batch_job_definition_name for THIS SFN alone. The
+          # arm64 CEs (r7g/m7g) can only exec the arm64 SWIPE runner; short-read-mngs is untouched.
+          "batch_job_definition_name" : aws_batch_job_definition.index_generation_arm64[0].name,
+        },
+      },
+    } : {},
+  )
   # Per-stage container memory (MB) defaults swipe injects as <Stage>SPOTMemory /
   # <Stage>EC2Memory into the SFN input. Download/Compress/Index are the new index-generation
   # stages (Lever 1, Track A); Run stays for swipe's built-in single-stage default-wdl
