@@ -1,16 +1,3 @@
-# Pinned x86_64 ECS-optimized AMI for the diamond + minimap2 alignment Batch CEs (SMP-1745).
-# Both module instances read the AWS-published "latest" ECS-optimized AMI via the module's SSM
-# data source, so every AWS AMI publish force-replaces all six alignment CEs on the next apply.
-# The default below is the id the live alignment CEs are CURRENTLY running (read from state), so
-# config == live and pinning is a no-op convergence -- no CE replacement. Bumped deliberately via
-# .github/workflows/bump-batch-ami.yml (which opens a reviewable PR). Keep the `# smp-1745-ami:x86`
-# marker: the bump workflow finds and rewrites this default by it.
-variable "batch_ami_id_alignment_x86" {
-  type        = string
-  default     = "ami-027eb2efb1c4cd48d" # smp-1745-ami:x86
-  description = "Pinned x86_64 ECS-optimized AMI for the diamond + minimap2 alignment Batch CEs. Default = the id live in state; bumped via .github/workflows/bump-batch-ami.yml (SMP-1745)."
-}
-
 locals {
   min_vcpus = {
     "default" : { "SPOT" : 0, "EC2" : 0 },
@@ -59,8 +46,9 @@ module "diamond" {
   alignment_algorithm = "diamond"
 
   // Compute Variables
-  // SMP-1745: pin the ECS-optimized AMI in real envs (test passes null -> module SSM fallback).
-  image_id = var.DEPLOYMENT_ENVIRONMENT == "test" ? null : var.batch_ami_id_alignment_x86
+  // AMI: the module reads the AWS-published latest ECS-optimized AMI and ignores in-place
+  // image_id changes (lifecycle block in the module), so publishes never force-replace the CEs.
+  // Roll a newer AMI deliberately with `terraform apply -replace`.
 
   // Utility Variables
 
@@ -98,8 +86,9 @@ module "minimap2" {
   alignment_algorithm = "minimap2"
 
   // Compute Variables
-  // SMP-1745: pin the ECS-optimized AMI in real envs (test passes null -> module SSM fallback).
-  image_id = var.DEPLOYMENT_ENVIRONMENT == "test" ? null : var.batch_ami_id_alignment_x86
+  // AMI: the module reads the AWS-published latest ECS-optimized AMI and ignores in-place
+  // image_id changes (lifecycle block in the module), so publishes never force-replace the CEs.
+  // Roll a newer AMI deliberately with `terraform apply -replace`.
 
   // Utility Variables
 
