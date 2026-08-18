@@ -73,6 +73,14 @@ variable "alignment_algorithm" {
   description = "which alignment algorithm to use (gsnap, rapsearch2)"
 }
 
+// Compute Variables
+
+variable "image_id" {
+  type        = string
+  default     = null
+  description = "Pinned ECS-optimized AMI id for the alignment Batch compute environments (SMP-1745). When null, falls back to the AWS-published latest via the SSM data source (used by the moto test env). Pinning to the id live in state stops AWS AMI publishes from force-replacing the CEs."
+}
+
 // Utility Variables
 
 variable "disabled" {
