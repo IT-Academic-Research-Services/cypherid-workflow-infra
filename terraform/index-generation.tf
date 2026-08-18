@@ -209,6 +209,47 @@ data "aws_ssm_parameter" "idseq_batch_ami" {
   name = "/${var.DEPLOYMENT_ENVIRONMENT == "test" ? "mock-aws" : "aws"}/service/ecs/optimized-ami/amazon-linux-2/${var.use_graviton && var.DEPLOYMENT_ENVIRONMENT != "test" ? "arm64/" : ""}recommended/image_id"
 }
 
+# Pinned ECS-optimized AMI ids for the index-generation Batch launch templates and compute
+# environments (SMP-1745). The data source above resolves the AWS-published "latest"
+# ECS-optimized AMI, which changes every time AWS publishes a new image and force-replaces
+# every Batch compute environment on the next plan/apply (image_id forces replacement). That
+# recurring churn -- CE replaces plus the launch-template and job-queue updates that trail
+# them -- is the single largest source of drift in this repo's plan.
+#
+# Instead of tracking "latest", the launch templates and CEs read these pinned ids. Each
+# default is the AMI the corresponding live resource is CURRENTLY running (read from state),
+# so config == live and the first plan after pinning shows NO change for these resources (no
+# CE replacement, no running Batch job torn down). The pins are advanced deliberately, on a
+# controlled cadence, by .github/workflows/bump-batch-ami.yml (which opens a reviewable PR;
+# it never applies). The trailing `# smp-1745-ami:<arch>` markers are how that workflow finds
+# and rewrites these defaults -- do not remove them.
+#
+# arm64 is the default/applied architecture (var.use_graviton = true). The x86 pin is only
+# consulted on the Track A fallback path (use_graviton = false) and is not currently live, so
+# it defaults to the current AWS-published latest x86 image rather than a live-state value.
+variable "batch_ami_id_arm64" {
+  type        = string
+  default     = "ami-03bd449594b6522bb" # smp-1745-ami:arm64
+  description = "Pinned arm64 (Graviton) ECS-optimized AMI for index-generation Batch CEs/launch templates. Default = the id live in state; bumped via .github/workflows/bump-batch-ami.yml (SMP-1745)."
+}
+
+variable "batch_ami_id_x86" {
+  type        = string
+  default     = "ami-06509e28f66bea302" # smp-1745-ami:x86
+  description = "Pinned x86_64 ECS-optimized AMI for the index-generation Track A fallback (use_graviton = false). Not currently live; defaults to the latest x86 image. Bumped via .github/workflows/bump-batch-ami.yml (SMP-1745)."
+}
+
+locals {
+  # Pin the AMI in real envs; keep the SSM data source (mock param) in the moto test env, which
+  # only seeds the x86 mock path and never boots a real image. Mirrors the arch choice the data
+  # source itself makes from var.use_graviton so the pinned image arch matches the instance arch.
+  index_generation_ami = (
+    var.DEPLOYMENT_ENVIRONMENT == "test"
+    ? data.aws_ssm_parameter.idseq_batch_ami.value
+    : (var.use_graviton ? var.batch_ami_id_arm64 : var.batch_ami_id_x86)
+  )
+}
+
 data "aws_vpc" "webservice_vpc" {
   count = var.DEPLOYMENT_ENVIRONMENT == "test" ? 0 : 1
 
@@ -298,7 +339,7 @@ resource "aws_launch_template" "index_generation" {
   # needs to do so using the v2 endpoint.
   # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html
 
-  image_id = data.aws_ssm_parameter.idseq_batch_ami.value
+  image_id = local.index_generation_ami
   metadata_options {
     http_endpoint               = "enabled"
     http_tokens                 = "required"
@@ -340,7 +381,7 @@ resource "aws_batch_compute_environment" "index_generation" {
       Name = "${local.service_name}-${each.key}-batch"
     }
 
-    image_id           = data.aws_ssm_parameter.idseq_batch_ami.value
+    image_id           = local.index_generation_ami
     min_vcpus          = 0
     desired_vcpus      = 0
     max_vcpus          = each.value.max_vcpus
