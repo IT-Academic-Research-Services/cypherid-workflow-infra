@@ -99,14 +99,23 @@ locals {
       provisioning = "EC2"
     }
     compress = {
-      instance_types_x86      = ["r6i.12xlarge"] # 48 vCPU / 384 GB
-      instance_types_graviton = ["r7g.12xlarge"] # 48 vCPU / 384 GB (Graviton3)
-      # Fan-out (800): CompressNR and CompressNT run CONCURRENTLY (Phase-2 lanes), both on
-      # this one compress compute environment. Each ncbi-compress job needs the whole 48-vCPU
-      # box, so max_vcpus must fit BOTH at once (2 x 48 = 96) -- at 48 they would serialize
-      # and silently lose the compress parallelism the fan-out exists for. Each lane still
-      # gets its own r6i.12xlarge node + its own 4 TB scratch (isolated, no shared-disk #798).
-      max_vcpus  = 96
+      instance_types_x86      = ["r6i.32xlarge", "r6i.12xlarge"] # 128 vCPU / 1024 GB ; 48 / 384
+      instance_types_graviton = ["r8g.48xlarge", "r8g.12xlarge"] # 192 vCPU / 1536 GB (Graviton4) ; 48 / 384
+      # Fan-out (800): CompressNR and CompressNT are the two Phase-2 lanes, both submitted to this
+      # one compute environment and running CONCURRENTLY. Batch selects each lane's instance by its
+      # MEMORY request (the vcpu request is 1; the container then uses every core of the instance it
+      # lands on), and each lane has its OWN memory knob in the launcher lambda (869):
+      #   - CompressNR (COMPRESS_NR_MEMORY 1450 GB) -> r8g.48xlarge (1536 GB / 192 vCPU, Graviton4).
+      #     ncbi-compress now parallelizes ACROSS taxids (per-taxid dedup is independent), so it
+      #     scales with cores instead of the old serial one-taxid-at-a-time loop that pinned 48
+      #     cores at 99% for ~34 h on core_nt. The large RAM is what lets many taxid units run at
+      #     once.
+      #   - CompressNT (COMPRESS_NT_MEMORY 384 GB) -> r8g.12xlarge (48 vCPU). NT is I/O-bound (the
+      #     EBS override below is for it); more cores do nothing, so it stays small and cheap and
+      #     runs alongside NR rather than contending for the big box.
+      # max_vcpus must fit BOTH instances concurrently: r8g.48xlarge (192) + r8g.12xlarge (48) = 240
+      # instance vCPUs, so 256 leaves headroom for both lanes at once.
+      max_vcpus  = 256
       scratch_gb = 4096
       # EBS PERFORMANCE OVERRIDE (compress only). ncbi-compress is the one index-generation
       # stage that is disk-throughput-bound, not CPU-bound: it streams the whole core_nt.fsa
@@ -562,36 +571,55 @@ resource "aws_lambda_function" "start_index_generation" {
       # Fan-out index-generation version (semver SSOT, platform-overhaul #843). Must match the
       # published WDL prefix s3://<workflows>/index-generation-<VER>/ and the ECR tag
       # index-generation:<VER>. Bump all three together when releasing a new index-gen version.
-      # v2.5.2 -- the first index-generation release built from source by CI rather than by hand.
       # This one variable is the SSOT for BOTH the ECR image tag (index-generation:<version>) and the
       # S3 WDL prefix (index-generation-<version>/), so both must exist before it is bumped. The
       # start_index_generation lambda now enforces this at runtime (SMP-1463): a preflight verifies
       # the WDL prefix (all 9 sub-WDLs) and the ECR tag exist and fails closed BEFORE StartExecution,
       # so a bump to a version whose artifacts are missing is rejected instead of dying inside SWIPE.
-      # Both currently exist:
-      #   ECR  index-generation:v2.5.2 -> sha256:2c98beb6f1eb36ad3f3458f99236827db8fa198a713bd844ddce4fae1ff29d88
-      #        multi-arch (linux/amd64 + linux/arm64); the arm64 entry is what the Graviton compress
-      #        nodes actually execute. Same digest as the CI build c5ffdf7 -- retagged, not rebuilt.
-      #   S3   index-generation-v2.5.2/ -> a BYTE-IDENTICAL copy of the v2.5.0 WDLs (9/9 etags match).
+      # Both do.
       #
-      # The WDLs are deliberately unchanged. The deployed v2.5.0 set carries the Lever 3 (801)
-      # parallel blastdbcmd extract, which lives on main; every fix in this image (superkingdom
-      # restore, the ncbi-compress split-chunk-size fix, the multi-arch build) lives on
-      # index-gen-lever2-fanout, which does NOT have Lever 3. Publishing WDLs from that branch would
-      # have silently regressed the download stage. So v2.5.2 changes the IMAGE ONLY. Reconciling the
-      # two lineages is tracked separately.
+      # v2.5.4 -- fully reconciled main lineage: parallel-over-taxids NR compress on Graviton (869),
+      # Lever 3 (801) download/index, AND the superkingdom-restore fix, all built from one main image.
+      # v2.5.3 moved the compress path onto main but its image was missing the superkingdom-restore
+      # fix (that fix had lived only on the lever2-fanout image line), so IndexTaxonomy's
+      # GenerateIndexLineages failed the core_nt run with KeyError ['superkingdom'] after NCBI's 2024
+      # rank overhaul dropped the literal superkingdom rank. Cherry-picking that fix (and its pandas
+      # test dep) onto main closes the last divergence, so v2.5.4 is the first version where every fix
+      # ships together.
+      #   ECR  index-generation:v2.5.4 -> sha256:7974969b5247f68b8136cedd1d2d3db3af71c8a57588804513444ac22ad5d7dc
+      #        multi-arch (linux/amd64 + linux/arm64); the arm64 entry is what the r8g Graviton
+      #        compress nodes execute. Retag of the CI build of main commit 46de596 -- built, tested,
+      #        and published as a single OCI index by wdl-ci.
+      #   S3   index-generation-v2.5.4/ -> main's 9 fan-out sub-WDLs, byte-identical to v2.5.3 (the
+      #        superkingdom fix is in the IMAGE, not the WDLs).
+      #
+      # COUPLING: v2.5.4's CompressNR requests 192 vCPU, which only places on the r8g compress
+      # compute environment sized in this same change, and CompressNR/CompressNT split their memory
+      # via COMPRESS_NR_MEMORY / COMPRESS_NT_MEMORY below. Apply the CE, the SFN, and this pin
+      # together; the pin alone would leave CompressNR unschedulable.
       #
       # v2.5.1 is skipped on purpose: v2.5.1-superkingdom is a hand-built overlay image, and an
       # adjacent v2.5.1 release tag would be easy to confuse with it.
-      INDEX_GENERATION_WORKFLOW_VERSION = "v2.5.2"
+      INDEX_GENERATION_WORKFLOW_VERSION = "v2.5.4"
       AWS_ACCOUNT_ID                    = var.AWS_ACCOUNT_ID
       # Per-stage container memory (MB) for the multi-stage pipeline (Lever 1, Track A).
       # Replaces the single MEMORY/VCPU override of the old monolith. VCPU is now set by
       # each stage's compute-environment instance family, not a container override.
-      DOWNLOAD_MEMORY     = "14000"  # c6i.2xlarge (16 GB), IO-bound download
-      COMPRESS_MEMORY     = "380000" # r6i.12xlarge (384 GB), ncbi-compress
-      INDEX_SPOT_MEMORY   = "128000" # index build on spot
-      INDEX_EC2_MEMORY    = "250000" # index build on the on-demand fallback
+      DOWNLOAD_MEMORY = "14000" # c6i.2xlarge (16 GB), IO-bound download
+      # Compress container memory (MB), one knob PER Phase-2 lane (869). Batch selects the compress
+      # instance by MEMORY (the job's vcpu request is 1; the container then uses every core of the
+      # instance its memory footprint lands on), so memory is what steers each lane onto a box. The
+      # two lanes size independently so they run CONCURRENTLY on the shared compress CE:
+      #   COMPRESS_NR_MEMORY 1450000 (1450 GB) fits only r8g.48xlarge (1536 GB / 192 vCPU) -> the
+      #     parallel-over-taxids NR compress runs across all 192 cores (was pinned to 48).
+      #   COMPRESS_NT_MEMORY 380000 (380 GB) fits r8g.12xlarge (384 GB / 48 vCPU). NT is I/O-bound,
+      #     so more cores do nothing; keeping it small lets it run alongside NR instead of fighting
+      #     for the big box. A single shared knob would force NT onto r8g.48xlarge too and, under
+      #     max_vcpus 256, serialize the lanes.
+      COMPRESS_NR_MEMORY  = "1450000" # r8g.48xlarge (1536 GB / 192 vCPU), parallel ncbi-compress
+      COMPRESS_NT_MEMORY  = "380000"  # r8g.12xlarge (384 GB / 48 vCPU), I/O-bound nt compress
+      INDEX_SPOT_MEMORY   = "128000"  # index build on spot
+      INDEX_EC2_MEMORY    = "250000"  # index build on the on-demand fallback
       BUCKET              = data.aws_s3_bucket.public-references.bucket
       S3_WORKFLOWS_BUCKET = aws_s3_bucket.workflows.bucket
     }
