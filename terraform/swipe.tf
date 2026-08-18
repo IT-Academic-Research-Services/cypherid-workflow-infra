@@ -1,23 +1,5 @@
-# Static pinned x86_64 ECS-optimized AMI for the swipe (short-read-mngs) Batch CEs (SMP-1745).
-# The swipe module otherwise resolves the AWS-published "latest" ECS-optimized AMI from its SSM
-# parameter, so every AWS AMI publish would force-replace both swipe CEs; the module's direct
-# `batch_ami_id` override (used below) bypasses the SSM lookup with a literal id, pinning it.
-# The default is the id the live swipe CEs are CURRENTLY running (read from state), so config ==
-# live -- no CE replacement.
-#
-# NOTE: the rest of this repo has moved off pinned ids to lifecycle `ignore_changes` on image_id
-# (the scheduled bump workflow has been retired). Swipe stays on this static pin for now because
-# the module's own `ignore_changes` fix lives only at a newer ref (v1.4.9-ucsf.5 predates it).
-# When swipe is bumped to that ref in its own PR, this override and variable are removed and swipe
-# joins the ignore_changes standard. Until then this pin is frozen (no automation advances it).
-variable "batch_ami_id_swipe_x86" {
-  type        = string
-  default     = "ami-0c01ef4a7e217cadb"
-  description = "Static pinned x86_64 ECS-optimized AMI for the swipe Batch CEs (frozen). Removed when swipe is bumped to the ref carrying the module's own image_id ignore_changes."
-}
-
 module "swipe" {
-  # Vendored in-house swipe (IT-ARS public mirror), pinned to an immutable tag. This is
+  # Vendored in-house swipe (IT-ARS public mirror), pinned to an immutable commit. This is
   # upstream v1.4.9 + our -ucsf changes: status2.json read fix, job images to AWS ECR
   # (not ghcr.io), sample-retention adjustments, AND the index-generation fan-out
   # (merge_parallel_outputs) that lets the Parallel per-DB Download state merge its
@@ -41,7 +23,16 @@ module "swipe" {
   # sfn-io-helper handle_failure fix that reports the real error instead of
   # KeyError: 'Error'. Both ride this ref because the module is pinned whole -- the
   # lambdas are not separately deployable.
-  source = "github.com/IT-Academic-Research-Services/swipe?ref=v1.4.9-ucsf.5"
+  # Pinned to the swipe mirror's main at commit 0ed0448 (== v1.4.9-ucsf.10 + PR #17). This is
+  # the ref that carries the module-internal `ignore_changes` on the swipe_main CE image_id, so
+  # AMI publishes no longer force-replace the swipe CEs -- no external batch_ami_id pin needed
+  # (the repo standardized off pinned ids onto ignore_changes; see index-generation.tf/alignment.tf).
+  # The bump from ucsf.5 also adopts: Python 3.8->3.12 for the sfn-io-helper Lambdas, the Sentry
+  # layer (optional; sentry_* inputs left null), StepFunction Catch ResultPath consistency, the
+  # SMP-1571 HandleFailure fix, the empty-metrics CloudWatch fix, EventBridge rule env-prefixing,
+  # and the multi-arch ECR publish path. The rendered image tag comes from the module's `version`
+  # file (v1.4.9-ucsf.10), which is present in each env's ECR before that env applies.
+  source = "github.com/IT-Academic-Research-Services/swipe?ref=0ed0448cb113da3d86bd135324819a7e6443981e"
   tags = {
     Name = "swipe"
   }
@@ -57,11 +48,10 @@ module "swipe" {
   # nothing is deleted. Enabling another env is a one-line edit to that list.
   restricted_files = local.enable_swipe_restricted_file_deletion ? local.swipe_restricted_files : []
 
-  # SMP-1745: pin the ECS-optimized AMI directly in real envs so AWS AMI publishes stop
-  # force-replacing the swipe CEs. batch_ami_id takes precedence over ami_ssm_parameter inside the
-  # module (image_id = length(ami_id) > 0 ? ami_id : <ssm>). The moto test env passes "" so the
-  # module keeps reading the seeded mock SSM param below.
-  batch_ami_id = var.DEPLOYMENT_ENVIRONMENT == "test" ? "" : var.batch_ami_id_swipe_x86
+  # AMI: the module reads the AWS-published latest ECS-optimized AMI and ignores in-place
+  # image_id changes on the CE (lifecycle block inside the module at this ref), so publishes no
+  # longer force-replace the swipe CEs. Roll a newer AMI deliberately with `terraform apply
+  # -replace`. No external batch_ami_id pin needed.
 
   # mocking parameters
   ami_ssm_parameter = var.DEPLOYMENT_ENVIRONMENT == "test" ? "/mock-aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id" : "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id"
