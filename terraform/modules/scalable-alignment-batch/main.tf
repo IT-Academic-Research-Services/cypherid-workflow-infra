@@ -121,7 +121,10 @@ resource "aws_batch_compute_environment" "alignment_compute_environment" {
       Name = "${local.service_name}-${each.key}-batch"
     }
 
-    image_id = data.aws_ssm_parameter.idseq_batch_ami.value
+    # SMP-1745: use the pinned AMI when the caller supplies one (real envs), otherwise fall back
+    # to the AWS-published latest via the SSM data source (the moto test env passes null). Pinning
+    # to the id live in state stops every AWS AMI publish from force-replacing these CEs.
+    image_id = coalesce(var.image_id, data.aws_ssm_parameter.idseq_batch_ami.value)
     #TODO: Is this needed?
     #ec2_key_pair = "idseq-${var.deployment_environment}"
     # TODO: set up per-environment vcpu limits

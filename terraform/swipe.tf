@@ -1,3 +1,18 @@
+# Pinned x86_64 ECS-optimized AMI for the swipe (short-read-mngs) Batch CEs (SMP-1745). The
+# swipe module otherwise resolves the AWS-published "latest" ECS-optimized AMI from its SSM
+# parameter, so every AWS AMI publish force-replaces both swipe CEs on the next apply. The
+# module already exposes a direct `batch_ami_id` override (used below) that bypasses the SSM
+# lookup entirely -- a literal id known at plan time, so there is no first-apply bootstrap.
+# The default is the id the live swipe CEs are CURRENTLY running (read from state), so config ==
+# live and pinning is a no-op convergence -- no CE replacement. Bumped deliberately via
+# .github/workflows/bump-batch-ami.yml. Keep the `# smp-1745-ami:x86` marker: the bump workflow
+# finds and rewrites this default by it.
+variable "batch_ami_id_swipe_x86" {
+  type        = string
+  default     = "ami-0c01ef4a7e217cadb" # smp-1745-ami:x86
+  description = "Pinned x86_64 ECS-optimized AMI for the swipe Batch CEs. Default = the id live in state; bumped via .github/workflows/bump-batch-ami.yml (SMP-1745)."
+}
+
 module "swipe" {
   # Vendored in-house swipe (IT-ARS public mirror), pinned to an immutable tag. This is
   # upstream v1.4.9 + our -ucsf changes: status2.json read fix, job images to AWS ECR
@@ -38,6 +53,12 @@ module "swipe" {
   # local.swipe_restricted_deletion_envs below; every other env gets an empty list, so
   # nothing is deleted. Enabling another env is a one-line edit to that list.
   restricted_files = local.enable_swipe_restricted_file_deletion ? local.swipe_restricted_files : []
+
+  # SMP-1745: pin the ECS-optimized AMI directly in real envs so AWS AMI publishes stop
+  # force-replacing the swipe CEs. batch_ami_id takes precedence over ami_ssm_parameter inside the
+  # module (image_id = length(ami_id) > 0 ? ami_id : <ssm>). The moto test env passes "" so the
+  # module keeps reading the seeded mock SSM param below.
+  batch_ami_id = var.DEPLOYMENT_ENVIRONMENT == "test" ? "" : var.batch_ami_id_swipe_x86
 
   # mocking parameters
   ami_ssm_parameter = var.DEPLOYMENT_ENVIRONMENT == "test" ? "/mock-aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id" : "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id"
