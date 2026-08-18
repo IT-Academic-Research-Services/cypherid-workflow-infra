@@ -78,7 +78,7 @@ variable "alignment_algorithm" {
 variable "image_id" {
   type        = string
   default     = null
-  description = "Pinned ECS-optimized AMI id for the alignment Batch compute environments (SMP-1745). When null, falls back to the AWS-published latest via the SSM data source (used by the moto test env). Pinning to the id live in state stops AWS AMI publishes from force-replacing the CEs."
+  description = "Optional create/replace-time ECS-optimized AMI id for the alignment Batch compute environments. When null (the default), the AWS-published latest is used via the SSM data source. The CE ignores in-place changes to image_id (see the lifecycle block in main.tf), so AMI publishes never force-replace it; roll a newer AMI deliberately with `terraform apply -replace`."
 }
 
 // Utility Variables

@@ -1,16 +1,19 @@
-# Pinned x86_64 ECS-optimized AMI for the swipe (short-read-mngs) Batch CEs (SMP-1745). The
-# swipe module otherwise resolves the AWS-published "latest" ECS-optimized AMI from its SSM
-# parameter, so every AWS AMI publish force-replaces both swipe CEs on the next apply. The
-# module already exposes a direct `batch_ami_id` override (used below) that bypasses the SSM
-# lookup entirely -- a literal id known at plan time, so there is no first-apply bootstrap.
+# Static pinned x86_64 ECS-optimized AMI for the swipe (short-read-mngs) Batch CEs (SMP-1745).
+# The swipe module otherwise resolves the AWS-published "latest" ECS-optimized AMI from its SSM
+# parameter, so every AWS AMI publish would force-replace both swipe CEs; the module's direct
+# `batch_ami_id` override (used below) bypasses the SSM lookup with a literal id, pinning it.
 # The default is the id the live swipe CEs are CURRENTLY running (read from state), so config ==
-# live and pinning is a no-op convergence -- no CE replacement. Bumped deliberately via
-# .github/workflows/bump-batch-ami.yml. Keep the `# smp-1745-ami:x86` marker: the bump workflow
-# finds and rewrites this default by it.
+# live -- no CE replacement.
+#
+# NOTE: the rest of this repo has moved off pinned ids to lifecycle `ignore_changes` on image_id
+# (the scheduled bump workflow has been retired). Swipe stays on this static pin for now because
+# the module's own `ignore_changes` fix lives only at a newer ref (v1.4.9-ucsf.5 predates it).
+# When swipe is bumped to that ref in its own PR, this override and variable are removed and swipe
+# joins the ignore_changes standard. Until then this pin is frozen (no automation advances it).
 variable "batch_ami_id_swipe_x86" {
   type        = string
-  default     = "ami-0c01ef4a7e217cadb" # smp-1745-ami:x86
-  description = "Pinned x86_64 ECS-optimized AMI for the swipe Batch CEs. Default = the id live in state; bumped via .github/workflows/bump-batch-ami.yml (SMP-1745)."
+  default     = "ami-0c01ef4a7e217cadb"
+  description = "Static pinned x86_64 ECS-optimized AMI for the swipe Batch CEs (frozen). Removed when swipe is bumped to the ref carrying the module's own image_id ignore_changes."
 }
 
 module "swipe" {
