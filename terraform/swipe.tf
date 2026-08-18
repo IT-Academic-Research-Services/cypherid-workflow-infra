@@ -37,6 +37,8 @@ module "swipe" {
     Name = "swipe"
   }
 
+  sentry_dsn = var.sentry_dsn
+
   app_name        = "idseq-swipe-${var.DEPLOYMENT_ENVIRONMENT}"
   job_policy_arns = [aws_iam_policy.idseq_batch_main_job.arn, "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"]
   call_cache      = true
@@ -310,11 +312,11 @@ resource "aws_vpc_security_group_egress_rule" "aegea-ecs-allow_dns_tcp_ipv4" {
 # --- Restricted intermediate-file deletion (data minimization) -----------------------
 # The vendored swipe fork deletes restricted intermediate files (host/human-filtered reads,
 # validated source fastqs) at the end of each Step Function run. LIVE in dev + staging so end
-# users can test; prod-preview / sandbox / prod stay dormant until deliberately added to the env
+# users can test; prod-preview / sandbox stay dormant until deliberately added to the env
 # list below. Env-list idiom matches the rest of this repo (contains([...], var.DEPLOYMENT_ENVIRONMENT)).
 locals {
   # Environments where restricted intermediate-file deletion is active. One-line edit to add/remove.
-  swipe_restricted_deletion_envs        = ["dev", "staging"]
+  swipe_restricted_deletion_envs        = ["dev", "staging", "prod"]
   enable_swipe_restricted_file_deletion = contains(local.swipe_restricted_deletion_envs, var.DEPLOYMENT_ENVIRONMENT)
 }
 
@@ -342,4 +344,10 @@ locals {
     ".*valid_input\\d+\\.fastq$",
     ".*validated_\\d+\\.fastq\\.gz$",
   ]
+}
+
+variable "sentry_dsn" {
+  type        = string
+  description = "The Sentry DSN"
+  default     = null
 }
