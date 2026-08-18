@@ -183,12 +183,23 @@ locals {
       title  = "Batch index-generation — jobs"
       region = var.AWS_DEFAULT_REGION
       view   = "timeSeries"
-      metrics = flatten([
-        for k, q in aws_batch_job_queue.index_generation : [
-          ["AWS/Batch", "SubmittedJobs", "JobQueue", q.name],
-          ["AWS/Batch", "FailedJobs", "JobQueue", q.name],
-        ]
-      ])
+      # CloudWatch requires properties.metrics to be an array of metric arrays;
+      # each element metrics[i] must itself be an array. flatten() is RECURSIVE,
+      # so flattening a list of metric arrays dissolves the inner arrays and
+      # emits a flat list of scalar strings -- CloudWatch then rejects every
+      # element with "Should be array" (PutDashboard InvalidParameterInput).
+      # Build the (queue, metric) pairs as OBJECTS first: flatten() collapses
+      # the per-queue nesting but leaves the objects intact (objects are leaves,
+      # not lists), then wrap each pair into its own metric array so the inner
+      # arrays survive.
+      metrics = [
+        for m in flatten([
+          for k, q in aws_batch_job_queue.index_generation : [
+            { queue = q.name, metric = "SubmittedJobs" },
+            { queue = q.name, metric = "FailedJobs" },
+          ]
+        ]) : ["AWS/Batch", m.metric, "JobQueue", m.queue]
+      ]
     }
   }
 
