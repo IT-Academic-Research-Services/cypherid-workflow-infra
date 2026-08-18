@@ -59,6 +59,10 @@ locals {
 # value). tier=Standard, type=String: a short version string, not a secret.
 resource "aws_ssm_parameter" "reference_index_current_version" {
   #checkov:skip=CKV2_AWS_34:non-secret value (a public dated index-generation version string, e.g. 2024-02-06). A SecureString/KMS param adds cost + forces --with-decryption in the promote/rollback scripts for zero confidentiality benefit; String is deliberate.
+  # Index-generation is dev-only compute (see local.index_generation_enabled in
+  # index-generation.tf); the reference-index version pointers are part of that build/promote
+  # layer, so they drop from staging/prod plans with everything else.
+  count       = local.index_generation_enabled ? 1 : 0
   name        = "${local.reference_index_ssm_prefix}/current-version"
   description = "Currently-serving NT/NR index-generation version (dated prefix segment). Flipped by the promote/rollback scripts; blue/green cutover pointer."
   type        = "String"
@@ -82,6 +86,7 @@ resource "aws_ssm_parameter" "reference_index_current_version" {
 # for `taxonomy:cutover_rollback`.
 resource "aws_ssm_parameter" "reference_index_previous_version" {
   #checkov:skip=CKV2_AWS_34:non-secret value (a public dated index-generation version string). String is deliberate; see current-version above.
+  count       = local.index_generation_enabled ? 1 : 0
   name        = "${local.reference_index_ssm_prefix}/previous-version"
   description = "Prior NT/NR index-generation version retained as the fast rollback target. Set by the promote script; consumed by the rollback script."
   type        = "String"
@@ -106,6 +111,7 @@ resource "aws_ssm_parameter" "reference_index_previous_version" {
 # index-generation format), so this one is TF-managed end to end (no ignore).
 resource "aws_ssm_parameter" "reference_index_major_version" {
   #checkov:skip=CKV2_AWS_34:non-secret value (the index-generation major-version segment, e.g. 2). String is deliberate; see current-version above.
+  count       = local.index_generation_enabled ? 1 : 0
   name        = "${local.reference_index_ssm_prefix}/major-version"
   description = "index-generation major-version segment of the serving artifact prefix (index-generation-<major>)."
   type        = "String"
@@ -134,7 +140,10 @@ resource "aws_ssm_parameter" "reference_index_major_version" {
 # Off by default (see var.enable_reference_index_staleness_alarm): enabling it
 # before the probe publishes the metric would breach immediately on missing data.
 resource "aws_cloudwatch_metric_alarm" "reference_index_staleness" {
-  count = var.enable_reference_index_staleness_alarm ? 1 : 0
+  # Part of the dev-only index-generation layer (local.index_generation_enabled); already
+  # off by default (var.enable_reference_index_staleness_alarm=false), so the added gate is a
+  # no-op on dev and simply prevents this alarm ever being turned on in staging/prod.
+  count = local.index_generation_enabled && var.enable_reference_index_staleness_alarm ? 1 : 0
 
   alarm_name        = "idseq-${var.DEPLOYMENT_ENVIRONMENT}-reference-index-staleness"
   alarm_description = "The serving NT/NR sequence index is older than the ${var.reference_index_staleness_max_age_days}-day SLA (or the staleness probe stopped reporting) -- pipeline ${var.DEPLOYMENT_ENVIRONMENT}."
@@ -171,7 +180,9 @@ resource "aws_cloudwatch_metric_alarm" "reference_index_staleness" {
 # here would be a cross-owner change on a live multi-TB bucket. Activates per env
 # only after the GR-8 migration to a TF-owned per-account bucket.
 resource "aws_s3_bucket_lifecycle_configuration" "reference_index_backup_retention" {
-  count = var.manage_reference_index_lifecycle && var.PUBLIC_REFERENCES_BUCKET_NAME != "" ? 1 : 0
+  # Part of the dev-only index-generation layer (local.index_generation_enabled); already gated
+  # off by default, so the added gate is a no-op on dev and keeps it out of staging/prod.
+  count = local.index_generation_enabled && var.manage_reference_index_lifecycle && var.PUBLIC_REFERENCES_BUCKET_NAME != "" ? 1 : 0
 
   bucket = local.s3_bucket_public_references
 
@@ -191,4 +202,26 @@ resource "aws_s3_bucket_lifecycle_configuration" "reference_index_backup_retenti
     # No expiration: retention/pruning of superseded index VERSIONS is an
     # operational decision (reference_index_prune.sh), never automatic deletion.
   }
+}
+
+# ---------------------------------------------------------------------------
+# State moves for the dev-only gate (platform-overhaul). The three reference-index
+# SSM pointer params gained count, moving their address from <addr> to <addr>[0].
+# Pure address moves (no destroy/recreate) where they exist in state; a moved block
+# whose source is not in state is a harmless no-op, so this is safe whether or not
+# an env has already applied these pointers.
+# ---------------------------------------------------------------------------
+moved {
+  from = aws_ssm_parameter.reference_index_current_version
+  to   = aws_ssm_parameter.reference_index_current_version[0]
+}
+
+moved {
+  from = aws_ssm_parameter.reference_index_previous_version
+  to   = aws_ssm_parameter.reference_index_previous_version[0]
+}
+
+moved {
+  from = aws_ssm_parameter.reference_index_major_version
+  to   = aws_ssm_parameter.reference_index_major_version[0]
 }

@@ -222,7 +222,10 @@ locals {
 
   pipeline_health_widgets = concat(
     local.pipeline_health_sfn_widgets,
-    [local.pipeline_health_batch_widget],
+    # The Batch index-generation widget iterates aws_batch_job_queue.index_generation, which is
+    # empty off-dev; drop the widget entirely there so PutDashboard is never handed a metric
+    # widget with an empty metrics array (dev/test keep it, unchanged).
+    local.index_generation_enabled ? [local.pipeline_health_batch_widget] : [],
     local.pipeline_health_queue_widgets,
   )
 }
