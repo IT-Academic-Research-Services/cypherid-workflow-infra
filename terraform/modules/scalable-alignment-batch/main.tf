@@ -152,6 +152,13 @@ resource "aws_batch_compute_environment" "alignment_compute_environment" {
     create_before_destroy = true
     ignore_changes = [
       compute_resources[0].desired_vcpus,
+      # AMI id. image_id resolves the AWS-published "latest" ECS-optimized AMI (via the SSM
+      # data source) unless var.image_id is set. Tracking it means every AWS AMI republish
+      # force-replaces this CE on the next plan -- the largest recurring source of Batch churn.
+      # Freeze it: the AMI is chosen at create/replace time and never diffs afterward. Roll a
+      # newer AMI deliberately with `terraform apply -replace` on this CE (or taint). This
+      # replaces the old external pinned-id + scheduled-bump mechanism (SMP-1745).
+      compute_resources[0].image_id,
     ]
   }
 
