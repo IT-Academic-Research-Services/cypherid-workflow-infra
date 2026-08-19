@@ -23,6 +23,10 @@ on:
         type: string
         required: false
         default: ''
+    secrets:
+      SENTRY_DSN:
+        required: true
+        description: "Sentry DSN to pass to Terraform"
     outputs:
       plan-artifact-id:
         description: The Artifact ID of the generated Terraform Plan
@@ -130,6 +134,8 @@ jobs:
         run: |
           make package-lambdas templates
       - name: Terraform Plan
+        env:
+          TF_VAR_sentry_dsn: ${{ secrets.SENTRY_DSN }}
         run: |
           # No -upgrade: provider versions are pinned by the committed
           # .terraform.lock.hcl so plans are reproducible and a malicious/broken

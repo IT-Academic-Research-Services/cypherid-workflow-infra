@@ -329,7 +329,7 @@ locals {
     ".*bowtie2_ercc_filtered\\d+\\.fastq$",
     ".*bowtie2_host\\.bam$",
     ".*bowtie2_host_filtered\\d+\\.fastq$",
-    ".*bowtie2_human\\.bam$",
+    ".*bowtie2_human\\.bam$", # Not in the original list in swipe, but added later
     ".*bowtie2_human_filtered\\d+\\.fastq$",
     # ".*dedup\\d+\\.fastq$",
     ".*fastp\\d+\\.fastq$",
