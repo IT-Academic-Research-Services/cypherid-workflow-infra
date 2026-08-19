@@ -24,8 +24,14 @@ on:
         required: false
         default: ''
     secrets:
+      AWS_ACCESS_KEY_ID:
+        required: false
+      AWS_SECRET_ACCESS_KEY:
+        required: false
+      AWS_SESSION_TOKEN:
+        required: false
       SENTRY_DSN:
-        required: true
+        required: false
         description: "Sentry DSN to pass to Terraform"
     outputs:
       plan-artifact-id:
@@ -36,6 +42,7 @@ on:
         value: ${{ jobs.plan.outputs.result-artifact-id }}
 
 env:
+  AWS_REGION: us-west-2
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -46,8 +53,6 @@ jobs:
     # The AWS env name (role, profile, `source environment.<env>`) still comes from inputs.environment.
     environment: ${{ inputs.github_environment != '' && inputs.github_environment || inputs.environment }}
     runs-on: ubuntu-latest
-    env:
-      AWS_REGION: us-west-2
     outputs:
       plan-artifact-id: ${{ steps.upload-plan.outputs.artifact-id }}
       result-artifact-id: ${{ steps.upload-result.outputs.artifact-id }}
@@ -80,29 +85,34 @@ jobs:
           # ListAccountAliases) plus scoped tfstate read, and its subject_ref_pattern is `*`, so the
           # `environment:<env>` OIDC subject this job presents is accepted.
           role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/czid-${{ inputs.environment }}-gh-actions-plan
+          role-session-name: GitHub_to_AWS_via_FederatedOIDC
           output-env-credentials: true
-          #role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
           aws-profile: idseq-${{ inputs.environment }}
       - name: Configure AWS Credentials for local execution using nektos act
         uses: aws-actions/configure-aws-credentials@v6.1.0
         if: ${{ env.ACT }}
         with:
+          role-to-assume: czid-${{ inputs.environment }}-gh-actions-plan
+          role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           output-env-credentials: true
-          #role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
           aws-profile: idseq-${{ inputs.environment }}
       - name: Read Terraform version (SSOT = .terraform-version)
         id: tfver
         run: echo "version=$(cat .terraform-version)" >> "$GITHUB_OUTPUT"
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
           terraform_version: ${{ steps.tfver.outputs.version }}
           terraform_wrapper: false
+      - name: Verify AWS auth + terraform
+        run: |
+          aws sts get-caller-identity --profile "idseq-${{ inputs.environment }}" --no-cli-pager --no-cli-auto-prompt
+          terraform version
       - name: Setup Terraform Environment
         # We manually create aws_config.json instead of using the 'init-tf' Makefile target, as that target also calls 'terraform init' without the '-upgrade' flag, which we need
         run: |
