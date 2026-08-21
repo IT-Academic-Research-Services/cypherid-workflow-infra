@@ -119,6 +119,8 @@ jobs:
       - name: Package Lambdas and create Templates
         run: make package-lambdas templates
       - name: Terraform Init + scoped Plan
+        env:
+          TF_VAR_sentry_dsn: ${{ secrets.SENTRY_DSN }}
         run: |
           terraform init -input=false
           read -ra _targets <<< "$TARGETS"
@@ -211,6 +213,8 @@ jobs:
         # the plan as stale -- which fails safe.
         run: make package-lambdas templates
       - name: Terraform Init + scoped Apply
+        env:
+          TF_VAR_sentry_dsn: ${{ secrets.SENTRY_DSN }}
         # Re-plan and apply the SAME -target set in ONE terraform invocation, rather than replaying a
         # tf.plan saved by the plan job. The saved-plan model requires byte-identical artifacts across
         # the plan->apply job boundary, but `make package-lambdas` is not deterministic for the chalice
