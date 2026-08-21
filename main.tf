@@ -10,6 +10,13 @@ variable "use_graviton" {
   description = "Run index-generation Batch stages on Graviton3 (arm64). Passthrough to module.idseq. Default true: arm64 is the applied state (the index-gen CEs run m7g/r7g); this is the value that reaches the module, so it -- not the module-level default -- is what actually selects the arch. Flip to false to fall back to Track A x86."
 }
 
+# Uppercase because Github Actions only allows upper case TF_VAR_SENTRY_DSN
+variable "sentry_dsn" {
+  type        = string
+  description = "The Sentry DSN"
+  nullable    = true
+}
+
 locals {
   # Chaos Engine sandbox marker. Applied ONLY when this is the dev-chaos environment, so
   # every resource in the disposable pipeline copy carries seqtoid.io/chaos-sandbox=true.
@@ -52,6 +59,7 @@ provider "aws" {
 module "idseq" {
   source       = "./terraform"
   use_graviton = var.use_graviton
+  sentry_dsn   = var.sentry_dsn
 }
 
 output "idseq" {
